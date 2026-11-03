@@ -111,24 +111,40 @@ Códigos de error del análisis: `LLM_TIMEOUT`, `LLM_INVALID_RESPONSE`, `LLM_PRO
 
 Cada etapa termina con tests en verde y uno o más commits.
 
-- [ ] **0. Setup**: `nest new`, TypeScript strict, oxlint/Prettier, `.gitignore`, `.nvmrc`,
+> **Reordenado el 2026-11-03** (decisión #18 en `ARCHITECTURE.md`): las etapas 1/2/3/4 originales
+> tenían una dependencia circular (la Etapa 1 pedía correr migraciones en `docker compose up`
+> antes de que la Etapa 2 creara el schema de Prisma). Se fusionaron en una sola etapa de
+> "infraestructura mínima + CRUD de logs" para tener antes posible algo real para programar y
+> probar. El checklist de abajo refleja el orden real; el contenido de cada etapa original sigue
+> vigente, solo cambia el agrupamiento.
+
+- [x] **0. Setup**: `nest new`, TypeScript strict, oxlint/Prettier, `.gitignore`, `.nvmrc`,
       `git init`, primer commit.
-- [ ] **1. Contenedores y config**: Dockerfile multi-stage, `docker-compose.yml` (app + Postgres
-      con healthcheck), `.env.example`, `ConfigModule` con validación. `docker compose up` levanta
-      todo y corre las migraciones al iniciar.
-- [ ] **2. Base de datos**: schema Prisma (ver ARCHITECTURE §5), migración inicial y seed realista
-      (4–5 servicios, ráfagas de errores repetidos, un incidente encadenado entre servicios).
-- [ ] **3. Base HTTP**: prefijo `/api`, `ValidationPipe` global, filtro global RFC 9457, health
-      con terminus (chequea la DB).
-- [ ] **4. Logs**: `POST /api/logs` (upsert de servicio), `GET /api/logs` con filtros y paginación,
-      `GET /api/logs/stats`. Unit + integración con casos borde.
-- [ ] **5. LLM (aislado)**: interfaz, schema Zod de respuesta, `LogPreprocessor` (normalizar,
+- [ ] **1. Infraestructura mínima + CRUD de logs** (fusiona las etapas 1/2/3/4 originales):
+      - Postgres en Docker (`docker-compose.yml`, healthcheck) — la app sigue corriendo local.
+      - Prisma: schema completo (ver ARCHITECTURE §5), migración inicial.
+      - `ConfigModule` con validación fail-fast de las env vars que ya se usan (`PORT`,
+        `DATABASE_URL`).
+      - Base HTTP: prefijo `/api`, `ValidationPipe` global, filtro global RFC 9457.
+      - Logs básico: `POST /api/logs` (upsert de servicio), `GET /api/logs` paginado. Unit +
+        integración (Testcontainers) con casos borde.
+      - **Diferido dentro de esta etapa** (se suman cuando se retome el resto de logs): seed
+        realista, filtros avanzados y `GET /api/logs/stats`, health check con terminus, Dockerfile
+        de la app.
+- [ ] **2. Logs — resto**: filtros (`service`, `level`, `from`, `to`, `search`), `GET
+      /api/logs/stats`, seed realista (4–5 servicios, ráfagas de errores repetidos, un incidente
+      encadenado entre servicios), health check con terminus.
+- [ ] **3. LLM (aislado)**: interfaz, schema Zod de respuesta, `LogPreprocessor` (normalizar,
       agrupar, recortar, enmascarar), prompt, `MockLlmProvider` con escenarios. Tests: respuesta
       válida, formato inesperado y timeout.
-- [ ] **6. Análisis**: `POST /api/logs/analyze` (202), worker pg-boss, persistencia de resultados y
+- [ ] **4. Análisis**: `POST /api/logs/analyze` (202), worker pg-boss, persistencia de resultados y
       findings, `GET /api/analysis/:id`. Tests de integración del flujo completo con el mock.
-- [ ] **7. Proveedor real**: `GeminiLlmProvider` con salida estructurada nativa + misma validación.
-- [ ] **8. Cierre**: Swagger, README completo (levantar, testear, uso de IA, pendientes), revisión
-      de ARCHITECTURE.md, verificación final (`docker compose up` desde cero, sin secretos en git).
+      También se agrega a la validación de env vars `LLM_PROVIDER`/`LLM_TIMEOUT_MS`/
+      `ANALYSIS_MAX_PATTERNS`/`ANALYSIS_MAX_RANGE_HOURS` (ver decisión #15).
+- [ ] **5. Proveedor real**: `GeminiLlmProvider` con salida estructurada nativa + misma validación.
+      Se agrega `LLM_API_KEY`/`LLM_MODEL` a la validación de env vars.
+- [ ] **6. Cierre**: Swagger, README completo (levantar, testear, uso de IA, pendientes), Dockerfile
+      multi-stage de la app + `docker-compose.yml` final (app + db), revisión de ARCHITECTURE.md,
+      verificación final (`docker compose up` desde cero, sin secretos en git).
 - [ ] **Extras (si hay tiempo)**: CI con GitHub Actions, Makefile, logging estructurado (pino),
       ingesta por lotes.

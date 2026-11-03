@@ -42,3 +42,32 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
   Docker. Se verificó build, unit tests, e2e tests y lint antes de inicializar git.
 - **Pendiente de revisar**: _(completar: si en algún momento el stack nuevo genera fricción,
   anotar acá qué pasó y si se revirtió a Jest/ESLint)_
+
+### 2026-11-03 — Infraestructura mínima + CRUD básico de logs
+- **Pedido**: destrabar la dependencia circular entre la Etapa 1 (compose con migraciones) y la
+  Etapa 2 (Prisma, que todavía no existía). Reordenar el plan y armar de una vez lo mínimo para
+  empezar a programar y probar: Postgres en Docker, Prisma instalado y configurado, las env vars
+  necesarias, y un primer extremo a extremo funcional (`POST`/`GET /api/logs`).
+- **Aporte**: schema de Prisma completo según el ERD ya documentado (`services`, `logs`,
+  `analyses`, `analysis_findings`); migración inicial generada **offline** con
+  `prisma migrate diff --from-empty --to-schema ... --script` (no había Postgres corriendo);
+  `ConfigModule` con validación fail-fast vía `class-validator` (ya decidido para los DTOs HTTP,
+  reusado un poco antes); filtro global RFC 9457; `LogsModule` con upsert de `Service` por
+  nombre y paginación; test de integración con **Testcontainers** para `logs.e2e-spec.ts`.
+- **Decisión propia**: documentadas como decisiones #15–#18 en `ARCHITECTURE.md` — validar solo
+  las env vars que el código usa hoy, Postgres en Docker con la app todavía local, el cambio de
+  Prisma 7 a *driver adapters* (`@prisma/adapter-pg`) en vez de `datasource.url`, y el
+  reordenamiento del plan por etapas.
+- **Corregido**: la instalación inicial (`npm install prisma @prisma/client ...`) resolvió
+  `prisma@8.0.0-rc.29` (el dist-tag `latest` del paquete CLI apunta hoy a un release candidate)
+  contra `@prisma/client@7.10.1` — una combinación de mayores distintos. Se reinstalaron ambos
+  pineados a `7.10.1` (versión estable, confirmada contra el registro de npm) antes de seguir.
+  También se corrigió `Reflect.getMetadata is not a function` en los tests unitarios: Nest carga
+  `reflect-metadata` como efecto secundario al arrancar la app, pero un test unitario aislado que
+  usa decoradores de `class-validator` sin pasar por `@nestjs/core` no lo tenía — se agregó
+  `vitest.setup.ts` con el import explícito.
+- **Pendiente de revisar**: el test `tests/logs.e2e-spec.ts` (Testcontainers) está escrito y
+  compila/type-checkea, pero no se pudo ejecutar en esta máquina porque Docker Desktop no estaba
+  disponible (falla limpia: "Could not find a working container runtime strategy"). Falta
+  correrlo una vez que Docker esté arriba, junto con `docker compose up -d db` +
+  `npm run db:migrate:dev` + prueba manual de `POST`/`GET /api/logs`.
