@@ -106,3 +106,23 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
   reproducible por cualquiera que clone el repo, se construye como `db/seed.ts` integrado al
   stack del proyecto (TypeScript, con sus propios tests), no como script suelto fuera de git.
 - **Pendiente de revisar**: —
+
+### 2026-11-03 — Promoción del seed a `db/seed.ts` (requisito del enunciado)
+- **Pedido**: al revisar el PDF del desafío, se identificó que pide explícitamente "scripts de
+  migración y seed con datos de ejemplo" y "al menos una consulta de agregación". Se decidió
+  oficializar el dataset multi-proveedor (hasta ahora solo en `.claude/`, fuera de git) como el
+  seed real del proyecto.
+- **Aporte**: se portó la lógica de `seed-dev-logs.mjs` a `db/seed.ts` (TypeScript, tipado,
+  dentro del repo) y se registró como seed oficial de Prisma vía `migrations.seed` en
+  `prisma.config.ts` (campo nuevo de Prisma 7, verificado en los tipos instalados de
+  `@prisma/config`) — así `npm run db:migrate:dev` lo corre automáticamente, y `npm run db:seed`
+  (`prisma db seed`) permite re-ejecutarlo a mano. Se mantuvo la idempotencia ya probada (borra
+  solo los logs de los 12 servicios que el propio script define antes de insertar) y se verificó
+  corriéndolo dos veces seguidas sin que el total cambiara. Se sumó `db/` al alcance de `oxlint`
+  y se confirmó `npm run build` en verde.
+- **Decisión propia**: se dio de baja `.claude/dev-data/seed-dev-logs.mjs` (superado por
+  `db/seed.ts`) y se actualizó `CLAUDE.md`: el seed de ejemplo se adelantó a la Etapa 1 (en vez de
+  esperar a la Etapa 2) precisamente porque es un requisito explícito del enunciado, no una
+  mejora interna.
+- **Pendiente de revisar**: la consulta de agregación (`GET /api/logs/stats`, también requisito
+  explícito del enunciado) todavía no está implementada — queda para la Etapa 2.

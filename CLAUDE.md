@@ -128,12 +128,15 @@ Cada etapa termina con tests en verde y uno o más commits.
       - Base HTTP: prefijo `/api`, `ValidationPipe` global, filtro global RFC 9457.
       - Logs básico: `POST /api/logs` (upsert de servicio), `GET /api/logs` paginado. Unit +
         integración (Testcontainers) con casos borde.
-      - **Diferido dentro de esta etapa** (se suman cuando se retome el resto de logs): seed
-        realista, filtros avanzados y `GET /api/logs/stats`, health check con terminus, Dockerfile
-        de la app.
+      - Seed de ejemplo (`db/seed.ts`, registrado en `prisma.config.ts#migrations.seed`): 12
+        servicios simulando AWS/Azure/GCP/on-prem, ~4800 logs con metadata realista por proveedor
+        y ráfagas de error, idempotente (`npm run db:seed`). Adelantado desde la Etapa 2 porque el
+        enunciado lo pide explícitamente ("scripts de migración y seed con datos de ejemplo").
+      - **Diferido dentro de esta etapa** (se suman cuando se retome el resto de logs): filtros
+        avanzados y `GET /api/logs/stats`, health check con terminus, Dockerfile de la app.
 - [ ] **2. Logs — resto**: filtros (`service`, `level`, `from`, `to`, `search`), `GET
-      /api/logs/stats`, seed realista (4–5 servicios, ráfagas de errores repetidos, un incidente
-      encadenado entre servicios), health check con terminus.
+      /api/logs/stats` (consulta de agregación por servicio/nivel/rango de fechas — requisito
+      explícito del enunciado), health check con terminus.
 - [ ] **3. LLM (aislado)**: interfaz, schema Zod de respuesta, `LogPreprocessor` (normalizar,
       agrupar, recortar, enmascarar), prompt, `MockLlmProvider` con escenarios. Tests: respuesta
       válida, formato inesperado y timeout.
