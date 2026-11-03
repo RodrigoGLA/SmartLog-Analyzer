@@ -71,3 +71,38 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
   disponible (falla limpia: "Could not find a working container runtime strategy"). Falta
   correrlo una vez que Docker esté arriba, junto con `docker compose up -d db` +
   `npm run db:migrate:dev` + prueba manual de `POST`/`GET /api/logs`.
+
+### 2026-11-03 — Skill de agente para el entorno local
+- **Pedido**: dejar documentado, fuera del repositorio, cómo levantar/parar/diagnosticar el
+  entorno local (Docker + Prisma + app) para no repetir la explicación en cada sesión de trabajo
+  con el agente.
+- **Aporte**: Claude Code armó una *skill* (`.claude/skills/local-dev-setup/SKILL.md`, no
+  versionada) con el runbook completo: cómo levantar los contenedores y correr las migraciones,
+  un smoke test manual (`curl` a `POST`/`GET /api/logs`), cómo parar/resetear sin perder el
+  volumen de datos, y la lista de problemas ya resueltos de Prisma 7 (mismatch de versiones,
+  driver adapters, `reflect-metadata` en tests) para no volver a diagnosticarlos desde cero.
+- **Decisión propia**: se mantiene fuera de git (se agregó `.claude/` al `.gitignore`) porque es
+  una guía operativa pensada para el propio agente, no documentación del proyecto en sí — lo que
+  otra persona necesita para levantar el proyecto ya está (o va a estar) en el README.
+- **Pendiente de revisar**: —
+
+### 2026-11-03 — Dataset de prueba multi-proveedor (AWS/Azure/GCP/on-prem)
+- **Pedido**: generar un volumen generoso de logs de prueba, variados por "proveedor" (AWS,
+  Azure, GCP, etc.), para verificar que la API y el schema soportan distintas formas de log sin
+  tener que inventar datos a mano en cada prueba manual.
+- **Aporte**: script (`.claude/dev-data/seed-dev-logs.mjs`, no versionado) que inserta ~4800 logs
+  en 12 servicios simulados, cada proveedor con su propia forma de `metadata` (AWS:
+  `requestId`/`logGroup`/`logStream`; Azure: `correlationId`/`resourceId`/`operationId`; GCP:
+  `trace`/`spanId`/`resource`; on-prem: `host`/`pid`) y mensajes realistas por nivel (cold
+  starts, throttling, timeouts, OOM, permisos denegados, etc.), con una ventana de "mala hora"
+  por servicio para simular ráfagas de error en vez de solo ruido uniforme. Es idempotente: antes
+  de insertar borra únicamente los logs de esos 12 servicios, sin tocar otros datos de prueba. Se
+  usó para probar `GET /api/logs` contra datos heterogéneos reales, confirmando que el campo
+  `metadata` (Json) soporta la variedad sin ningún cambio de schema.
+- **Decisión propia**: se evaluó con el autor si subir esta herramienta al repositorio para
+  mostrar el proceso de prueba con IA. Se decidió mantenerla fuera de git — es tooling de
+  desarrollo generado por el agente, no el seed "realista" oficial de la Etapa 2 — y documentar
+  el proceso acá en su lugar. Si más adelante conviene un dataset de prueba versionado y
+  reproducible por cualquiera que clone el repo, se construye como `db/seed.ts` integrado al
+  stack del proyecto (TypeScript, con sus propios tests), no como script suelto fuera de git.
+- **Pendiente de revisar**: —
