@@ -141,6 +141,8 @@ Cada etapa termina con tests en verde y uno o más commits.
       - Filtros en `GET /api/logs` (`service`, `level`, `from`, `to`, `search`) — pendiente.
       - Health check con terminus — pendiente.
       - `interval` (hora/día) en `/api/logs/stats` — pendiente, opcional si da el tiempo.
+      - Swagger/OpenAPI (`@nestjs/swagger`, servido en `/docs`) — **hecho**, adelantado desde la
+        Etapa 6 para tener documentación interactiva mientras se suman endpoints (decisión #22).
 - [ ] **3. LLM (aislado)**: interfaz, schema Zod de respuesta, `LogPreprocessor` (normalizar,
       agrupar, recortar, enmascarar), prompt, `MockLlmProvider` con escenarios. Tests: respuesta
       válida, formato inesperado y timeout.
@@ -150,7 +152,7 @@ Cada etapa termina con tests en verde y uno o más commits.
       `ANALYSIS_MAX_PATTERNS`/`ANALYSIS_MAX_RANGE_HOURS` (ver decisión #15).
 - [ ] **5. Proveedor real**: `GeminiLlmProvider` con salida estructurada nativa + misma validación.
       Se agrega `LLM_API_KEY`/`LLM_MODEL` a la validación de env vars.
-- [ ] **6. Cierre**: Swagger, README completo (levantar, testear, uso de IA, pendientes), Dockerfile
+- [ ] **6. Cierre**: README completo (levantar, testear, uso de IA, pendientes), Dockerfile
       multi-stage de la app + `docker-compose.yml` final (app + db), revisión de ARCHITECTURE.md,
       verificación final (`docker compose up` desde cero, sin secretos en git).
 - [ ] **Extras (si hay tiempo)**: CI con GitHub Actions, Makefile, logging estructurado (pino),

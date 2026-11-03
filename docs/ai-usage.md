@@ -171,3 +171,25 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
 - **Pendiente de revisar**: ninguno — queda corregido y verificado, pero vale aclararlo en la
   entrevista como ejemplo de "qué pasa cuando algo falla" (un test en verde por las razones
   equivocadas es peor que un test que nunca se escribió).
+
+### 2026-11-03 — Documentación de la API con `@nestjs/swagger`
+- **Pedido**: el autor preguntó qué opción estándar hay en Nest para documentar la API (venía de
+  usar Swagger/Swashbuckle en .NET) y pidió integrarla ya, para poder probar la app desde ahí en
+  vez de solo con `curl`.
+- **Aporte**: `@nestjs/swagger` (único camino serio en el ecosistema Nest), servido en `/docs`.
+  Se habilitó el plugin del compilador (`nest-cli.json`, `classValidatorShim` +
+  `introspectComments`) para que infiera los esquemas de los DTOs a partir de los decoradores de
+  `class-validator` ya existentes, sin duplicar esa información a mano en cada campo. Se agregaron
+  `@ApiTags`/`@ApiOperation` en el controller, y `@ApiQuery()` explícito para los parámetros de
+  query (`page`/`limit`, `groupBy`/`from`/`to`), que el plugin no infiere solo. Se probó el ciclo
+  completo desde la UI: `POST /api/logs` (201, log creado) → `GET /api/logs/stats?groupBy=service`
+  (200, refleja el log recién creado).
+- **Corregido**: al reiniciar el servidor de desarrollo para que tomara el plugin nuevo, el
+  proceso anterior no liberó el puerto 3000 (quedó un proceso Node huérfano) — el servidor nuevo
+  fallaba con `EADDRINUSE` y, mientras tanto, Swagger seguía sirviendo silenciosamente la versión
+  vieja del código (por eso los `@ApiQuery` no aparecían al principio). Se identificó el PID real
+  con `netstat`/`taskkill` y se confirmó la versión nueva después de matarlo.
+- **Decisión propia**: documentada como decisión #22 en `ARCHITECTURE.md`. Se adelantó desde la
+  Etapa 6 ("Cierre") a ahora, para tener documentación interactiva mientras se siguen sumando
+  endpoints (LLM, análisis) en vez de documentar todo recién al final.
+- **Pendiente de revisar**: ninguno.
