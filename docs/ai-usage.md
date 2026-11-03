@@ -126,3 +126,48 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
   mejora interna.
 - **Pendiente de revisar**: la consulta de agregación (`GET /api/logs/stats`, también requisito
   explícito del enunciado) todavía no está implementada — queda para la Etapa 2.
+
+### 2026-11-03 — Consulta de agregación `GET /api/logs/stats`
+- **Pedido**: releer el PDF del desafío para confirmar qué pide exactamente la consulta de
+  agregación ("al menos una... por servicio, nivel o rango de fechas") y qué pide la sección de
+  despliegue, e implementar la agregación según lo ya planeado en `CLAUDE.md`.
+- **Aporte**: `GET /api/logs/stats?groupBy=service|level&from=&to=` vía `prisma.log.groupBy()`.
+  Un solo `groupBy` por request (no combinado), `from`/`to` opcionales validados como ISO 8601
+  (`class-validator`), y un `BadRequestException` manual si `from > to` (formateado igual que el
+  resto de errores vía el filtro RFC 9457 ya existente). Para `groupBy=service` se resuelve el
+  nombre del servicio con una segunda consulta (`service.findMany` por los IDs agrupados), ya que
+  `groupBy` no hace join. Tests unitarios (niveles, servicios, rango inválido) + 2 casos e2e
+  (`200` con datos agregados, `400` con `from > to`).
+- **Decisión propia**: se agregaron las decisiones #19 y #20 a `ARCHITECTURE.md` (adelanto del
+  seed a la Etapa 1, y el diseño de `groupBy` simple vs. combinado) — se habían tomado antes pero
+  no estaban documentadas ahí todavía, solo en `docs/ai-usage.md`. Se confirmó además, releyendo
+  el PDF, que la sección "05 Contenedores y despliegue" solo pide `Dockerfile` +
+  `docker-compose.yml` locales — no pide desplegar a la nube — por lo que esa idea (ej. Google
+  Cloud + Neon) se descarta del alcance de este desafío y queda anotada como posible extra si
+  sobra tiempo.
+- **Pendiente de revisar**: el bucketing por intervalo (`interval=hour|day`, para series de
+  tiempo) quedó afuera de este alcance — es una mejora, no el requisito mínimo.
+
+### 2026-11-03 — Bug encontrado: los tests e2e nunca estuvieron aislados de la base de dev
+- **Pedido**: ninguno explícito — surgió corriendo `npm run test:e2e` como parte de la
+  verificación de la nueva consulta de agregación.
+- **Aporte**: el primer test e2e (`creates a log...`), que antes pasaba con 1 resultado, empezó a
+  devolver 20 (el límite de paginación por defecto) apenas la base de dev tuvo más de 20 logs
+  reales (después de sembrar el dataset multi-proveedor). Se investigó con logging temporal y se
+  confirmó la causa: `ConfigModule.forRoot({ validate: validateEnv })` valida las env vars **al
+  importar `AppModule`**, que ocurre antes de que el `beforeAll` del test llegue a pisar
+  `process.env.DATABASE_URL` con la URL del contenedor de Testcontainers. Ese pisado "a tiempo"
+  nunca tuvo efecto: los tests e2e estuvieron conectándose a la base de datos de desarrollo real
+  desde que se escribieron (Etapa 1), y solo parecían pasar porque esa base estaba vacía la
+  primera vez que corrieron. De paso se encontró que `AppController`/`AppService` (y sus specs)
+  eran boilerplate del scaffold de `nest new`, nunca adaptado al proyecto real — se dieron de baja
+  por ser código muerto.
+- **Corregido**: en vez de depender del timing de `process.env`, el test ahora reemplaza el
+  provider `PrismaService` con `overrideProvider(PrismaService).useValue(...)` — una instancia
+  construida a mano, apuntada directamente a la URL del contenedor de Testcontainers. Es el
+  patrón estándar de Nest para este caso y no depende de en qué momento Nest valida el entorno.
+  Se verificó explícitamente que la corrida ya no toca la base de dev (el total vía `GET
+  /api/logs` no cambió después de correr `npm run test:e2e`).
+- **Pendiente de revisar**: ninguno — queda corregido y verificado, pero vale aclararlo en la
+  entrevista como ejemplo de "qué pasa cuando algo falla" (un test en verde por las razones
+  equivocadas es peor que un test que nunca se escribió).

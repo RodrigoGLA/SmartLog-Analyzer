@@ -134,9 +134,13 @@ Cada etapa termina con tests en verde y uno o más commits.
         enunciado lo pide explícitamente ("scripts de migración y seed con datos de ejemplo").
       - **Diferido dentro de esta etapa** (se suman cuando se retome el resto de logs): filtros
         avanzados y `GET /api/logs/stats`, health check con terminus, Dockerfile de la app.
-- [ ] **2. Logs — resto**: filtros (`service`, `level`, `from`, `to`, `search`), `GET
-      /api/logs/stats` (consulta de agregación por servicio/nivel/rango de fechas — requisito
-      explícito del enunciado), health check con terminus.
+- [ ] **2. Logs — resto**:
+      - `GET /api/logs/stats?groupBy=service|level&from=&to=` (consulta de agregación — requisito
+        explícito del enunciado) — **hecho**. Un solo `groupBy` por request, sin bucketing por
+        intervalo todavía (decisión #20 en `ARCHITECTURE.md`).
+      - Filtros en `GET /api/logs` (`service`, `level`, `from`, `to`, `search`) — pendiente.
+      - Health check con terminus — pendiente.
+      - `interval` (hora/día) en `/api/logs/stats` — pendiente, opcional si da el tiempo.
 - [ ] **3. LLM (aislado)**: interfaz, schema Zod de respuesta, `LogPreprocessor` (normalizar,
       agrupar, recortar, enmascarar), prompt, `MockLlmProvider` con escenarios. Tests: respuesta
       válida, formato inesperado y timeout.
