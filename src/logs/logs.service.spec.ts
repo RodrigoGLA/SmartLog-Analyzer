@@ -7,19 +7,22 @@ function createPrismaMock() {
   return {
     service: {
       upsert: vi.fn(),
+      findMany: vi.fn(),
     },
     log: {
       create: vi.fn(),
       findMany: vi.fn(),
       count: vi.fn(),
+      groupBy: vi.fn(),
     },
     $transaction: vi.fn(),
   } as unknown as PrismaService & {
-    service: { upsert: ReturnType<typeof vi.fn> };
+    service: { upsert: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
     log: {
       create: ReturnType<typeof vi.fn>;
       findMany: ReturnType<typeof vi.fn>;
       count: ReturnType<typeof vi.fn>;
+      groupBy: ReturnType<typeof vi.fn>;
     };
     $transaction: ReturnType<typeof vi.fn>;
   };
@@ -104,5 +107,45 @@ describe('LogsService', () => {
     expect(result.meta).toEqual({ page: 2, limit: 10, total: 42 });
     expect(result.data[0].service).toBe('db-proxy');
     expect(result.data[0].id).toBe('1');
+  });
+
+  it('groups stats by level', async () => {
+    prisma.log.groupBy.mockResolvedValue([
+      { level: LogLevel.ERROR, _count: { _all: 5 } },
+      { level: LogLevel.INFO, _count: { _all: 20 } },
+    ]);
+
+    const result = await service.getStats({ groupBy: 'level' });
+
+    expect(result.groupBy).toBe('level');
+    expect(result.data).toEqual([
+      { key: 'INFO', count: 20 },
+      { key: 'ERROR', count: 5 },
+    ]);
+  });
+
+  it('groups stats by service, resolving service names', async () => {
+    prisma.log.groupBy.mockResolvedValue([
+      { serviceId: 1, _count: { _all: 3 } },
+      { serviceId: 2, _count: { _all: 9 } },
+    ]);
+    prisma.service.findMany.mockResolvedValue([
+      { id: 1, name: 'checkout-api' },
+      { id: 2, name: 'payments-api' },
+    ]);
+
+    const result = await service.getStats({ groupBy: 'service' });
+
+    expect(result.data).toEqual([
+      { key: 'payments-api', count: 9 },
+      { key: 'checkout-api', count: 3 },
+    ]);
+  });
+
+  it('rejects a from/to range where from is after to', async () => {
+    await expect(
+      service.getStats({ groupBy: 'level', from: '2026-02-01', to: '2026-01-01' }),
+    ).rejects.toThrow('`from` must be earlier than or equal to `to`');
+    expect(prisma.log.groupBy).not.toHaveBeenCalled();
   });
 });

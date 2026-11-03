@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import type { Log, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service.js';
 import type { CreateLogDto } from './dto/create-log.dto.js';
 import type { ListLogsQueryDto } from './dto/list-logs-query.dto.js';
+import type { StatsGroupBy, StatsQueryDto } from './dto/stats-query.dto.js';
 
 export interface LogResponse {
   id: string;
@@ -18,6 +19,18 @@ export interface LogResponse {
 export interface PaginatedLogs {
   data: LogResponse[];
   meta: { page: number; limit: number; total: number };
+}
+
+export interface StatsEntry {
+  key: string;
+  count: number;
+}
+
+export interface StatsResponse {
+  groupBy: StatsGroupBy;
+  from: string | null;
+  to: string | null;
+  data: StatsEntry[];
 }
 
 @Injectable()
@@ -63,6 +76,46 @@ export class LogsService {
       data: logs.map((log) => this.toResponse(log, log.service.name)),
       meta: { page, limit, total },
     };
+  }
+
+  async getStats(query: StatsQueryDto): Promise<StatsResponse> {
+    const from = query.from ? new Date(query.from) : undefined;
+    const to = query.to ? new Date(query.to) : undefined;
+    if (from && to && from > to) {
+      throw new BadRequestException('`from` must be earlier than or equal to `to`');
+    }
+
+    const where: Prisma.LogWhereInput = {};
+    if (from || to) {
+      where.timestamp = { ...(from && { gte: from }), ...(to && { lte: to }) };
+    }
+
+    const data =
+      query.groupBy === 'level' ? await this.statsByLevel(where) : await this.statsByService(where);
+
+    return {
+      groupBy: query.groupBy,
+      from: query.from ?? null,
+      to: query.to ?? null,
+      data: data.sort((a, b) => b.count - a.count),
+    };
+  }
+
+  private async statsByLevel(where: Prisma.LogWhereInput): Promise<StatsEntry[]> {
+    const grouped = await this.prisma.log.groupBy({ by: ['level'], where, _count: { _all: true } });
+    return grouped.map((g) => ({ key: g.level, count: g._count._all }));
+  }
+
+  private async statsByService(where: Prisma.LogWhereInput): Promise<StatsEntry[]> {
+    const grouped = await this.prisma.log.groupBy({ by: ['serviceId'], where, _count: { _all: true } });
+    const services = await this.prisma.service.findMany({
+      where: { id: { in: grouped.map((g) => g.serviceId) } },
+    });
+    const nameById = new Map(services.map((s) => [s.id, s.name]));
+    return grouped.map((g) => ({
+      key: nameById.get(g.serviceId) ?? String(g.serviceId),
+      count: g._count._all,
+    }));
   }
 
   private toResponse(log: Log, serviceName: string): LogResponse {
