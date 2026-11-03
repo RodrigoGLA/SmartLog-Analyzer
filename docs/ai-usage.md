@@ -193,3 +193,28 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
   Etapa 6 ("Cierre") a ahora, para tener documentación interactiva mientras se siguen sumando
   endpoints (LLM, análisis) en vez de documentar todo recién al final.
 - **Pendiente de revisar**: ninguno.
+
+### 2026-11-03 — Cola pg-boss: creación y verificación de pickup por worker
+- **Pedido**: crear la infraestructura de la cola en Postgres y verificar que un worker toma los
+  jobs, dejando la implementación real del análisis (LLM, persistencia, endpoints) para una vuelta
+  aparte.
+- **Aporte**: `pg-boss` instalado (versión estable verificada contra el registro de npm, igual
+  cuidado que con Prisma). `src/queue/` con `QueueModule` (`@Global()`, mismo criterio que
+  `DatabaseModule`), `PgBossService` (`extends PgBoss`, seguido el patrón exacto de
+  `PrismaService`: inyecta `ConfigService`, `onModuleInit` arranca y crea la cola, `onModuleDestroy`
+  la para) y la constante `ANALYSIS_QUEUE`. Verificación real con `tests/queue.e2e-spec.ts`: un
+  test contra Postgres efímero (Testcontainers) que manda un job y confirma que un worker
+  registrado lo recibe con el payload correcto.
+- **Corregido**: el build inicial de `PgBossService` fallaba al resolver su dependencia en el
+  test e2e de logs (`Nest can't resolve dependencies of the PgBossService`) porque el `ConfigService`
+  se había importado con `import type` en vez de `import` — con tipos borrados en compilación, Nest
+  no tiene la referencia en runtime para inferir qué inyectar por tipo. Se corrigió comparando
+  contra el import real de `PrismaService` (que sí usa `import` normal para lo mismo).
+- **Decisión propia**: documentada como decisión #23 en `ARCHITECTURE.md` — no registrar ningún
+  `.work()` en código de la aplicación en esta vuelta (la verificación vive solo en el test, contra
+  una base efímera que nunca toca la base real), para no dejar un handler "de prueba" que después
+  compita en silencio con el worker real de la Etapa 4 si no se borra a tiempo. Se verificó además
+  a mano que `pg-boss` crea su propio schema (`pgboss`) en la base de dev real al arrancar
+  (`npm run start:dev`), sin errores.
+- **Pendiente de revisar**: la implementación real del análisis (worker, `LlmProvider`,
+  persistencia de `Analysis`/`AnalysisFinding`, endpoints) queda para la próxima vuelta.

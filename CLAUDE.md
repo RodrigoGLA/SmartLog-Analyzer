@@ -150,6 +150,12 @@ Cada etapa termina con tests en verde y uno o más commits.
       findings, `GET /api/analysis/:id`. Tests de integración del flujo completo con el mock.
       También se agrega a la validación de env vars `LLM_PROVIDER`/`LLM_TIMEOUT_MS`/
       `ANALYSIS_MAX_PATTERNS`/`ANALYSIS_MAX_RANGE_HOURS` (ver decisión #15).
+      - Cola pg-boss creada y verificada (`src/queue/`: `QueueModule`, `PgBossService`, constante
+        `ANALYSIS_QUEUE`) — **hecho**. Test e2e (`tests/queue.e2e-spec.ts`) prueba que un worker
+        registrado recibe un job enviado (decisión #23). Sin worker placeholder en el arranque a
+        propósito — se evita a futuro un doble `.work()` compitiendo por la cola.
+      - Pendiente: worker real de análisis, persistencia de `Analysis`/`AnalysisFinding`,
+        endpoints `POST /api/logs/analyze` y `GET /api/analysis/:id`.
 - [ ] **5. Proveedor real**: `GeminiLlmProvider` con salida estructurada nativa + misma validación.
       Se agrega `LLM_API_KEY`/`LLM_MODEL` a la validación de env vars.
 - [ ] **6. Cierre**: README completo (levantar, testear, uso de IA, pendientes), Dockerfile
