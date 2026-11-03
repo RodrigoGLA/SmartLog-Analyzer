@@ -196,3 +196,13 @@ Cada decisión incluye la alternativa descartada y el motivo.
 - Para volúmenes grandes, un análisis **map-reduce**: resumir por bloques y después resumir los
   resúmenes.
 - Autenticación entre servicios (API keys o mTLS) y rate limiting en la ingesta.
+- **`GET /api/logs`: paginación por cursor (`id`/`timestamp`) en vez de `page`/`limit` por
+  offset.** Hoy usa `skip`/`take` (decisión consciente para este prototipo: simple, permite pedir
+  "página N" directo, y el volumen es manejable). A escala real tiene dos problemas: `OFFSET`
+  grande obliga a Postgres a recorrer y descartar todas las filas anteriores antes de la página
+  pedida (cada vez más lento cuanto más atrás se pagina), y si se insertan logs nuevos mientras se
+  pagina, las filas se corren y se puede repetir o saltear un registro. Cursor pagination
+  (`WHERE id < :cursor ORDER BY id DESC LIMIT :limit`) resuelve ambos — usa el índice directo sin
+  importar cuán "atrás" se pagina, y el cursor es un valor estable, no una posición relativa. El
+  costo es no poder saltar directo a una página arbitraria, aceptable para un caso de uso de
+  scroll hacia atrás en el tiempo como este.
