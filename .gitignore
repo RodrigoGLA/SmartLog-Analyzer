@@ -17,3 +17,16 @@ Thumbs.db
 
 .vscode/
 .idea/
+
+# Secretos / overrides locales que no deben compartirse
+.npmrc
+docker-compose.override.yml
+*.pem
+*.key
+*.crt
+*.p12
+
+# Backups de editor
+*.swp
+*.swo
+*~
