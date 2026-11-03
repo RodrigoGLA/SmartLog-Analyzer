@@ -1,0 +1,92 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+  FATAL
+}
+
+enum AnalysisStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Service {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  logs             Log[]
+  analysisFindings AnalysisFinding[]
+
+  @@map("services")
+}
+
+model Log {
+  id         BigInt    @id @default(autoincrement())
+  serviceId  Int       @map("service_id")
+  level      LogLevel
+  message    String
+  timestamp  DateTime  @default(now())
+  ingestedAt DateTime  @default(now()) @map("ingested_at")
+  traceId    String?   @map("trace_id")
+  metadata   Json?
+
+  service Service @relation(fields: [serviceId], references: [id])
+
+  @@index([serviceId, timestamp])
+  @@index([level, timestamp])
+  @@index([timestamp])
+  @@map("logs")
+}
+
+model Analysis {
+  id             String    @id @default(uuid())
+  status         AnalysisStatus @default(pending)
+  filters        Json
+  inputSnapshot  Json?     @map("input_snapshot")
+  summary        String?
+  suggestions    Json?
+  provider       String?
+  model          String?
+  errorCode      String?   @map("error_code")
+  errorMessage   String?   @map("error_message")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  completedAt    DateTime? @map("completed_at")
+
+  findings AnalysisFinding[]
+
+  @@map("analyses")
+}
+
+model AnalysisFinding {
+  id          BigInt   @id @default(autoincrement())
+  analysisId  String   @map("analysis_id")
+  serviceId   Int?     @map("service_id")
+  // String, not enum: ARCHITECTURE.md §5 no define todavía los valores de finding_category (se decide en la etapa del LLM).
+  category    String   @map("finding_category")
+  severity    Severity
+  description String
+
+  analysis Analysis @relation(fields: [analysisId], references: [id])
+  service  Service? @relation(fields: [serviceId], references: [id])
+
+  @@map("analysis_findings")
+}
