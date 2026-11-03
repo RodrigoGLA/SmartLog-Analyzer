@@ -207,3 +207,12 @@ Cada decisión incluye la alternativa descartada y el motivo.
   importar cuán "atrás" se pagina, y el cursor es un valor estable, no una posición relativa. El
   costo es no poder saltar directo a una página arbitraria, aceptable para un caso de uso de
   scroll hacia atrás en el tiempo como este.
+- **Test de volumen/concurrencia para la cola (`src/queue/`).** `tests/queue.e2e-spec.ts`
+  (decisión #23) prueba que un worker toma un job, pero no prueba carga: cientos de jobs en
+  paralelo, varios workers compitiendo (`teamSize`/`batchSize` de pg-boss), verificando que cada
+  job se procesa exactamente una vez (sin duplicados, gracias al `SKIP LOCKED` que usa pg-boss
+  internamente) y midiendo throughput. Se dejó afuera a propósito: no lo pide el enunciado, y en
+  esta máquina conviene no sumar carga/dependencias extra (nada de herramientas de load testing
+  como k6 — un test así se podría armar liviano, con Vitest, pocos cientos de jobs con payloads
+  chicos y concurrencia vía las opciones nativas de pg-boss en vez de procesos adicionales) cuando
+  todavía falta lo obligatorio (worker real de análisis, `LlmProvider`, endpoints).
