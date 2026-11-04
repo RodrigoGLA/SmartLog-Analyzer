@@ -2,12 +2,13 @@ import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AnalysisStatus, type Prisma } from '@prisma/client';
 import type { Job } from 'pg-boss';
+import type { ZodError } from 'zod';
 import type { EnvironmentVariables } from '../config/env.schema.js';
 import { PrismaService } from '../database/prisma.service.js';
 import { analysisResultSchema, type AnalysisResult } from '../llm/analysis-result.schema.js';
 import { LLM_PROVIDER } from '../llm/llm.constants.js';
 import { LlmInvalidResponseError, LlmProviderError, LlmTimeoutError, type LlmErrorCode } from '../llm/llm.errors.js';
-import type { LlmAnalysisInput, LlmProvider } from '../llm/llm-provider.interface.js';
+import type { LlmAnalysisInput, LlmCorrectionContext, LlmProvider } from '../llm/llm-provider.interface.js';
 import { LogPreprocessor, type LogPattern } from '../llm/log-preprocessor.js';
 import { LogsService } from '../logs/logs.service.js';
 import { PgBossService } from '../queue/pg-boss.service.js';
@@ -75,13 +76,8 @@ export class AnalysisWorkerService implements OnModuleInit {
     const inputSnapshot = this.buildInputSnapshot(input);
 
     try {
-      const raw = await this.withTimeout(this.llmProvider.analyze(input), timeoutMs);
-      const parsed = analysisResultSchema.safeParse(raw);
-      if (!parsed.success) {
-        throw new LlmInvalidResponseError(parsed.error.issues[0]?.message ?? 'Invalid LLM response shape');
-      }
-
-      await this.persistSuccess(analysisId, parsed.data, inputSnapshot);
+      const result = await this.analyzeWithRetries(input, timeoutMs);
+      await this.persistSuccess(analysisId, result, inputSnapshot);
     } catch (error) {
       const mapped = this.mapDomainError(error);
       if (!mapped) {
@@ -89,6 +85,46 @@ export class AnalysisWorkerService implements OnModuleInit {
       }
       await this.persistFailure(analysisId, mapped, inputSnapshot);
     }
+  }
+
+  /**
+   * Hace hasta `LLM_MAX_CORRECTION_RETRIES` reintentos cuando la respuesta del LLM no es válida
+   * (JSON que no cumple `analysisResultSchema`, o directamente no es JSON), reenviando el error de
+   * validación como contexto de corrección. Cualquier otro error (timeout, falla del proveedor,
+   * infraestructura) se propaga de inmediato, sin reintentar — una corrección de prompt no arregla
+   * ninguno de esos casos (ver decisión #28 en ARCHITECTURE.md).
+   */
+  private async analyzeWithRetries(input: LlmAnalysisInput, timeoutMs: number): Promise<AnalysisResult> {
+    const maxRetries = this.config.get('LLM_MAX_CORRECTION_RETRIES', { infer: true });
+    let correction: LlmCorrectionContext | undefined;
+    let lastError: LlmInvalidResponseError | undefined;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const raw = await this.withTimeout(this.llmProvider.analyze(input, correction), timeoutMs);
+        const parsed = analysisResultSchema.safeParse(raw);
+        if (parsed.success) {
+          return parsed.data;
+        }
+        lastError = new LlmInvalidResponseError(this.describeValidationError(parsed.error));
+        correction = { previousResponse: raw, validationError: lastError.message };
+      } catch (error) {
+        if (!(error instanceof LlmInvalidResponseError)) {
+          throw error;
+        }
+        lastError = error;
+        correction = { previousResponse: undefined, validationError: error.message };
+      }
+      this.logger.warn(
+        `Analysis: LLM response rejected (attempt ${attempt + 1}/${maxRetries + 1}): ${lastError.message}`,
+      );
+    }
+
+    throw lastError;
+  }
+
+  private describeValidationError(error: ZodError): string {
+    return error.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
   }
 
   private withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {

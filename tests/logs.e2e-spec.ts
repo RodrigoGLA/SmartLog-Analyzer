@@ -25,7 +25,12 @@ describe('Logs (e2e)', () => {
     // Testcontainers (sin pisar `PgBossService` también, este test conectaba en silencio a la
     // Postgres real de dev en el puerto 5432, tal como `PrismaService` antes de la decisión #21).
     const testConfig = {
-      get: () => container.getConnectionUri(),
+      get: (key: string) => {
+        if (key === 'DATABASE_URL') return container.getConnectionUri();
+        if (key === 'LLM_TIMEOUT_MS') return 20000;
+        if (key === 'LLM_MAX_CORRECTION_RETRIES') return 1;
+        return undefined;
+      },
     } as unknown as ConfigService<EnvironmentVariables, true>;
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })

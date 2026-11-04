@@ -9,19 +9,19 @@ import { ProblemDetailsFilter } from '../src/common/filters/problem-details.filt
 import type { EnvironmentVariables } from '../src/config/env.schema.js';
 import { PrismaService } from '../src/database/prisma.service.js';
 import { LLM_PROVIDER } from '../src/llm/llm.constants.js';
-import type { LlmAnalysisInput, LlmProvider } from '../src/llm/llm-provider.interface.js';
+import type { LlmAnalysisInput, LlmCorrectionContext, LlmProvider } from '../src/llm/llm-provider.interface.js';
 import { PgBossService } from '../src/queue/pg-boss.service.js';
 import { startTestPostgres } from './setup/postgres-test-container.js';
 
 // Controllable test double: each `it()` sets `analyzeImpl` before acting, so the same
 // overridden provider instance can simulate different LLM behaviors (success, transient
 // failure) across test cases without rebuilding the whole Nest app each time.
-let analyzeImpl: (input: LlmAnalysisInput) => Promise<unknown> = () =>
+let analyzeImpl: (input: LlmAnalysisInput, correction?: LlmCorrectionContext) => Promise<unknown> = () =>
   Promise.resolve({ summary: 'ok', findings: [], suggestions: [] });
 
 const testLlmProvider: LlmProvider = {
   name: 'test-double',
-  analyze: (input) => analyzeImpl(input),
+  analyze: (input, correction) => analyzeImpl(input, correction),
 };
 
 async function waitForTerminalStatus(
@@ -48,7 +48,12 @@ describe('Analysis (e2e)', () => {
     container = await startTestPostgres();
 
     const testConfig = {
-      get: () => container.getConnectionUri(),
+      get: (key: string) => {
+        if (key === 'DATABASE_URL') return container.getConnectionUri();
+        if (key === 'LLM_TIMEOUT_MS') return 20000;
+        if (key === 'LLM_MAX_CORRECTION_RETRIES') return 1;
+        return undefined;
+      },
     } as unknown as ConfigService<EnvironmentVariables, true>;
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
@@ -151,5 +156,61 @@ describe('Analysis (e2e)', () => {
     expect(result.status).toBe('completed');
     expect(result.summary).toBe('recovered after retry');
     expect(attempts).toBeGreaterThanOrEqual(2);
+  });
+
+  it('recovers from an invalid-shaped response by retrying with a correction, and completes', async () => {
+    await request(app.getHttpServer())
+      .post('/api/logs')
+      .send({
+        service: 'checkout-api',
+        level: 'ERROR',
+        message: 'invalid-then-valid test',
+        timestamp: '2026-04-01T00:00:00.000Z',
+      })
+      .expect(201);
+
+    let calls = 0;
+    analyzeImpl = async () => {
+      calls += 1;
+      if (calls === 1) {
+        return { summary: 42, findings: 'not-an-array' };
+      }
+      return { summary: 'corrected on retry', findings: [], suggestions: [] };
+    };
+
+    const createResponse = await request(app.getHttpServer())
+      .post('/api/logs/analyze')
+      .send({ from: '2026-04-01T00:00:00.000Z', to: '2026-04-02T00:00:00.000Z' })
+      .expect(202);
+
+    const result = await waitForTerminalStatus(app, createResponse.body.id as string);
+
+    expect(result.status).toBe('completed');
+    expect(result.summary).toBe('corrected on retry');
+    expect(calls).toBe(2);
+  });
+
+  it('gives up after exhausting correction retries and marks the analysis failed', async () => {
+    await request(app.getHttpServer())
+      .post('/api/logs')
+      .send({
+        service: 'checkout-api',
+        level: 'ERROR',
+        message: 'always-invalid test',
+        timestamp: '2026-05-01T00:00:00.000Z',
+      })
+      .expect(201);
+
+    analyzeImpl = async () => ({ summary: 42, findings: 'not-an-array' });
+
+    const createResponse = await request(app.getHttpServer())
+      .post('/api/logs/analyze')
+      .send({ from: '2026-05-01T00:00:00.000Z', to: '2026-05-02T00:00:00.000Z' })
+      .expect(202);
+
+    const result = await waitForTerminalStatus(app, createResponse.body.id as string);
+
+    expect(result.status).toBe('failed');
+    expect((result.error as { code: string }).code).toBe('LLM_INVALID_RESPONSE');
   });
 });

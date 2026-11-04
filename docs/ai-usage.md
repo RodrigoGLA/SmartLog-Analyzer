@@ -389,3 +389,41 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
   no para este desafío, que pide un único `GET /api/health`.
 - **Pendiente de revisar**: el reintento "con corrección" del LLM ante `LLM_INVALID_RESPONSE`
   sigue como el último de los 3 puntos prioritarios acordados con el autor.
+
+### 2026-11-04 — Reintento "con corrección" ante `LLM_INVALID_RESPONSE`
+- **Pedido**: el autor pidió implementar el último de los 3 puntos prioritarios — la idea que
+  había quedado anotada (y diferida) desde la Etapa 5: cuando el LLM devuelve algo que no cumple
+  `analysisResultSchema`, reenviarle el prompt 1-2 veces con el error de validación antes de
+  rendirse. Pidió un plan corto con una descripción y los casos a considerar para el retry (vía
+  `/plan`), y de paso aclaró que, si testear el camino de reintento resultaba muy complejo (forzar
+  al LLM real a fallar), se podía omitir esa cobertura. No hizo falta: todos los tests (unitarios y
+  e2e) usan dobles controlados (`vi.fn()`/un provider de prueba con una función mutable) que
+  simplemente devuelven primero una respuesta inválida y después una válida, sin tocar la API real
+  — la "complejidad" que preocupaba no aplicaba.
+- **Aporte**: `AnalysisWorkerService` ahora reintenta hasta `LLM_MAX_CORRECTION_RETRIES` veces
+  (env var nueva, default `1`, tope `2`) solo cuando la respuesta del LLM es `LLM_INVALID_RESPONSE`
+  (JSON que no cumple el schema, o ni siquiera es JSON) — `LlmTimeoutError`/`LlmProviderError`
+  siguen terminales de inmediato, sin cambios. El contexto de corrección (`LlmCorrectionContext`:
+  la respuesta anterior + el motivo del rechazo) se pasa como segundo parámetro opcional de
+  `LlmProvider.analyze`, no dentro de `LlmAnalysisInput`. `GeminiLlmProvider` lo arma como un turno
+  de chat real (`user` con el prompt original → `model` con la respuesta anterior → `user` con el
+  pedido de corrección) en vez de concatenar todo en un string. `pg-boss.expireInSeconds` pasó de
+  ser una constante fija (`60`) a calcularse a partir de `LLM_TIMEOUT_MS` y el tope de reintentos,
+  para que una secuencia de reintentos legítima nunca choque con que pg-boss declare el job
+  "colgado" y lo reintente él mismo en paralelo. Tests nuevos: `prompt.spec.ts` (nuevo),
+  `gemini-llm-provider.spec.ts` (+1, la forma del turno multi-chat), `analysis-worker.service.
+  spec.ts` (+4: reintenta y completa, agota reintentos y falla, `retries=0` no reintenta, el
+  provider lanzando `LlmInvalidResponseError` directamente también reintenta), y 2 casos e2e
+  nuevos en `tests/analysis.e2e-spec.ts` con el mismo double mutable que el archivo ya tenía.
+- **Corregido**: dos cosas detectadas recién al correr los tests, no al escribir el código.
+  (1) El `testConfig` falso que usan los 3 e2e specs (`logs`/`analysis`/`health`) ignoraba la
+  clave pedida y siempre devolvía la connection string de Postgres — funcionaba porque
+  `PgBossService` solo leía `DATABASE_URL` hasta ahora; al agregarle lectura de `LLM_TIMEOUT_MS`/
+  `LLM_MAX_CORRECTION_RETRIES` para calcular `expireInSeconds`, esos valores llegaban como string
+  (la URL) en vez de número, dando `NaN`. Se corrigió el double en los 3 archivos para responder
+  según la clave pedida, con defaults razonables. (2) El primer intento del test e2e "agota
+  reintentos" comparaba `result.errorCode` directo, pero `GET /api/analysis/:id` expone el error
+  anidado como `result.error.code` (`analysis.service.ts`) — se corrigió la aserción.
+- **Decisión propia**: documentada como decisión #28 en `ARCHITECTURE.md`.
+- **Pendiente de revisar**: ninguno de los 3 puntos prioritarios queda pendiente. Sigue para
+  después (Etapa 6, sin apuro): README, Dockerfile de la app, `docker-compose.yml` final.

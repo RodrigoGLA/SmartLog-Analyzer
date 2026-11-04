@@ -171,8 +171,16 @@ Cada etapa termina con tests en verde y uno o más commits.
       `AnalysisWorkerService` → Gemini → `GET /api/analysis/:id` con `completed` y findings reales.
       Idea anotada (fuera de git, `.claude/notes/analysis-worker-flow.md`): reintento "con
       corrección" ante `LLM_INVALID_RESPONSE`, reenviando el prompt 1-2 veces con el error de Zod
-      antes de rendirse — evaluada y **diferida** a pedido del autor, no implementada en esta
-      vuelta.
+      antes de rendirse — evaluada y diferida en su momento a pedido del autor; **implementada**
+      después (decisión #28), ver Etapa 2.5 más abajo.
+- [x] **2.5. Reintento "con corrección" ante `LLM_INVALID_RESPONSE`**: `AnalysisWorkerService`
+      reintenta hasta `LLM_MAX_CORRECTION_RETRIES` veces (nueva env var, default 1, tope 2) cuando
+      la respuesta del LLM no cumple `analysisResultSchema` o ni siquiera es JSON válido,
+      reenviando el error de validación al provider. Solo este error reintenta — timeout y fallas
+      del proveedor siguen terminales de inmediato, sin cambios (decisión #28, reafirma #24/#25).
+      `GeminiLlmProvider` lo arma como un turno de chat real (`user`→`model` con la respuesta
+      anterior→`user` con la corrección). `pg-boss.expireInSeconds` pasó de ser una constante fija
+      a calcularse a partir de `LLM_TIMEOUT_MS` y el tope de reintentos.
 - [ ] **6. Cierre**: README completo (levantar, testear, uso de IA, pendientes), Dockerfile
       multi-stage de la app + `docker-compose.yml` final (app + db), revisión de ARCHITECTURE.md,
       verificación final (`docker compose up` desde cero, sin secretos en git).

@@ -19,7 +19,12 @@ describe('Health (e2e)', () => {
     container = await startTestPostgres();
 
     const testConfig = {
-      get: () => container.getConnectionUri(),
+      get: (key: string) => {
+        if (key === 'DATABASE_URL') return container.getConnectionUri();
+        if (key === 'LLM_TIMEOUT_MS') return 20000;
+        if (key === 'LLM_MAX_CORRECTION_RETRIES') return 1;
+        return undefined;
+      },
     } as unknown as ConfigService<EnvironmentVariables, true>;
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })

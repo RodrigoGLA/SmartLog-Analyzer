@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { analysisResultSchema } from './analysis-result.schema.js';
 import { GEMINI_RESPONSE_SCHEMA, GeminiLlmProvider } from './gemini-llm-provider.js';
-import type { LlmAnalysisInput } from './llm-provider.interface.js';
+import type { LlmAnalysisInput, LlmCorrectionContext } from './llm-provider.interface.js';
 import { LlmInvalidResponseError, LlmProviderError, LlmTimeoutError } from './llm.errors.js';
 import type { LogPattern } from './log-preprocessor.js';
-import { buildPrompt, SYSTEM_PROMPT } from './prompt.js';
+import { buildCorrectionPrompt, buildPrompt, SYSTEM_PROMPT } from './prompt.js';
 
 function buildInput(patterns: LogPattern[] = []): LlmAnalysisInput {
   return {
@@ -159,6 +159,27 @@ describe('GeminiLlmProvider', () => {
     expect(body.contents[0].parts[0].text).toBe(buildPrompt(input));
     expect(body.generationConfig.responseMimeType).toBe('application/json');
     expect(body.generationConfig.responseSchema).toEqual(GEMINI_RESPONSE_SCHEMA);
+  });
+
+  it('sends a 3-turn chat with the previous response and correction when retrying', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(JSON.stringify({ summary: 's', findings: [], suggestions: [] })));
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = new GeminiLlmProvider('test-key', 'gemini-3.5-flash-lite', 5000);
+    const correction: LlmCorrectionContext = {
+      previousResponse: { summary: 42, findings: 'not-an-array' },
+      validationError: 'summary: Expected string, received number',
+    };
+
+    await provider.analyze(buildInput(), correction);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+
+    expect(body.contents).toHaveLength(3);
+    expect(body.contents[0].role).toBe('user');
+    expect(body.contents[1]).toEqual({ role: 'model', parts: [{ text: JSON.stringify(correction.previousResponse) }] });
+    expect(body.contents[2].role).toBe('user');
+    expect(body.contents[2].parts[0].text).toBe(buildCorrectionPrompt(correction));
   });
 
   it('exposes "gemini" as its name', () => {
