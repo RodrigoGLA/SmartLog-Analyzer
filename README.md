@@ -1,0 +1,78 @@
+# SmartLog Analyzer
+
+Desafío técnico de Abstracta: una API que recibe logs de microservicios, permite consultarlos y
+agregarlos, y usa un LLM para analizar un rango de logs y devolver un resumen, hallazgos
+categorizados y sugerencias.
+
+El detalle de diseño (diagrama de componentes, flujo del análisis, modelo de datos y cada decisión
+técnica con su alternativa descartada) está en **[ARCHITECTURE.md](ARCHITECTURE.md)**. Este README
+es solo la puerta de entrada: qué hace y cómo correrlo.
+
+## Qué hace
+
+- **`POST /api/logs`** — ingesta un log, registrando el servicio si no existe.
+- **`GET /api/logs`** — lista logs paginados, con filtros (`service`, `level`, `from`, `to`,
+  `search`).
+- **`GET /api/logs/stats`** — agrega logs por servicio o por nivel (consulta de agregación).
+- **`POST /api/logs/analyze`** — encola un análisis de IA sobre un rango de logs (202, asíncrono).
+- **`GET /api/analysis/:id`** — consulta el resultado (`pending` → `processing` →
+  `completed`/`failed`, con `summary`, `findings` y `suggestions`, o el error).
+- **`GET /api/health`** — estado del servicio y su conexión a la base.
+
+El análisis corre en un worker separado (cola `pg-boss` sobre la misma Postgres): el log se agrupa
+en patrones, se enmascaran datos sensibles, y se le pide al LLM un JSON validado con Zod. Si la
+respuesta no cumple el contrato, el worker reintenta con el error de validación antes de rendirse.
+Ver el diagrama de flujo y las decisiones #3–#5, #24–#25 y #28 en ARCHITECTURE.md.
+
+## Stack
+
+NestJS + TypeScript, PostgreSQL + Prisma 7, `pg-boss` como cola (sin Redis), Zod para validar la
+salida del LLM, Google Gemini como proveedor real (con un mock para desarrollo/tests). Swagger en
+`/docs`. Por qué cada una de estas elecciones: ARCHITECTURE.md §6 (decisiones #1–#3, #7, #13).
+
+## Cómo correrlo
+
+Requisitos: Node 26.x (ver `engines` en `package.json`) y Docker (para Postgres, y para los tests
+e2e, que levantan un Postgres efímero con Testcontainers).
+
+```bash
+cp .env.example .env
+docker compose up -d
+npm install
+npm run db:migrate:dev
+npm run start:dev
+```
+
+`db:migrate:dev` aplica las migraciones y corre el seed de ejemplo automáticamente (12 servicios,
+~4800 logs — decisión #19). La app queda en `http://localhost:3000`, con Swagger interactivo en
+`http://localhost:3000/docs`.
+
+Por defecto `LLM_PROVIDER=mock` en `.env.example`, así que no hace falta ninguna key para probar el
+flujo completo. Para usar el proveedor real, generar una key gratuita en
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey) y completar `LLM_PROVIDER=gemini`
++ `LLM_API_KEY` en `.env`. El resto de las variables (timeouts, límites de paginación/patrones,
+reintentos) están documentadas con sus defaults en `.env.example`.
+
+## Cómo testear
+
+```bash
+npm test          # unitarios (Prisma/pg-boss mockeados)
+npm run test:e2e  # integración (Docker arriba — Testcontainers levanta Postgres por test)
+npm run lint       # oxlint, type-aware
+```
+
+## Uso de IA
+
+- **En la app**: el análisis usa un LLM (Gemini, o un mock con escenarios para tests) detrás de una
+  interfaz (`LlmProvider`) intercambiable por variable de entorno. La salida se valida con Zod antes
+  de persistirse; ver ARCHITECTURE.md §4 y las decisiones #4, #5, #25 y #28.
+- **En el desarrollo**: este proyecto se construyó con asistencia de Claude Code. El detalle de cada
+  sesión (qué se pidió, qué se corrigió, qué decisiones se tomaron sin consultar) está en
+  **[docs/ai-usage.md](docs/ai-usage.md)**.
+
+## Qué queda afuera
+
+Hoy solo Postgres corre en Docker; la app corre local (decisión #16) — falta el `Dockerfile`
+multi-stage de la app y un `docker-compose.yml` que levante todo junto. El checklist completo de
+etapas, con lo que está hecho y lo que falta, está en **[CLAUDE.md](CLAUDE.md)**; las limitaciones
+conocidas y qué cambiaría en producción están en **ARCHITECTURE.md §8**.
