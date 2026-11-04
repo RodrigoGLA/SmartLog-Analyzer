@@ -138,7 +138,8 @@ Cada etapa termina con tests en verde y uno o más commits.
       - `GET /api/logs/stats?groupBy=service|level&from=&to=` (consulta de agregación — requisito
         explícito del enunciado) — **hecho**. Un solo `groupBy` por request, sin bucketing por
         intervalo todavía (decisión #20 en `ARCHITECTURE.md`).
-      - Filtros en `GET /api/logs` (`service`, `level`, `from`, `to`, `search`) — pendiente.
+      - Filtros en `GET /api/logs` (`service`, `level`, `from`, `to`, `search`) — **hecho**
+        (decisión #26 en `ARCHITECTURE.md`).
       - Health check con terminus — pendiente.
       - `interval` (hora/día) en `/api/logs/stats` — pendiente, opcional si da el tiempo.
       - Swagger/OpenAPI (`@nestjs/swagger`, servido en `/docs`) — **hecho**, adelantado desde la

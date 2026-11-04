@@ -316,3 +316,38 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
   un problema del diseño — se documenta como una nota para quien reproduzca esto en desarrollo.
 - **Pendiente de revisar**: el reintento "con corrección" ante `LLM_INVALID_RESPONSE` sigue
   anotado y diferido (confirmado explícitamente con el autor esta vuelta, no implementado).
+
+### 2026-11-04 — Filtros en `GET /api/logs`, merge a `main`, e idea de notificación anotada
+- **Pedido**: el autor pidió comitear y pushear el proveedor Gemini, mergear `develop` a `main` con
+  un comentario sobre el estado del flujo mínimo e2e, anotar en el repo (visible en git, no en
+  notas locales) la idea de notificar la finalización de un análisis (en vez de solo polling), y
+  después seguir con los 3 puntos pendientes en orden de prioridad: filtros de `GET /api/logs`,
+  health check, y el reintento "con corrección" del LLM. Antes de planificar los filtros, se releyó
+  el PDF del desafío para confirmar qué pide exactamente — resultó que `GET /api/logs` "con
+  filtros" está en la tabla de endpoints mínimos, no es un extra, y es un requisito distinto de la
+  consulta de agregación (`GET /api/logs/stats`, ya resuelta). Se usó `/plan` de nuevo: un
+  subagente `Explore` relevó el estado exacto del código y uno `Plan` diseñó la implementación.
+- **Aporte**: `git merge --no-ff develop -m "..."` a `main` (sin conflictos, 17 commits de
+  diferencia, nada divergente en `main`), con un mensaje describiendo el estado real (ingesta →
+  cola → worker → LLM real → consulta, con pulido pendiente). Pusheado a `origin/main`. La idea de
+  notificación quedó documentada como un nuevo ítem en `ARCHITECTURE.md` §8 ("Qué cambiaría en
+  producción"): un webhook opcional (`callbackUrl` en `POST /api/logs/analyze`) como complemento al
+  polling, con sus trade-offs frente a SSE/WebSocket. `GET /api/logs` ahora filtra por `service`
+  (case-insensitive, vía el filtro de relación de Prisma `service: { name: {...} } }`), `level`
+  (`@IsEnum(LogLevel)`), `from`/`to` (mismo patrón de validación que ya usaba `/stats`), y `search`
+  (substring case-insensitive sobre `message`, vía `contains` + `mode: 'insensitive'`, que Prisma
+  traduce a `ILIKE`). 8 tests unitarios nuevos en `logs.service.spec.ts` (cada filtro solo,
+  combinados, cero resultados, `from > to` rechazado) y 2 nuevos en el e2e (un combo
+  servicio+nivel de punta a punta, probando además la insensibilidad a mayúsculas con un query real
+  `?service=PAYMENTS-API`, y el caso 400).
+- **Corregido**: ninguno — el build/lint/unit/e2e completos pasaron a la primera.
+- **Decisión propia**: documentada como decisión #26 en `ARCHITECTURE.md`. `service` matchea
+  case-insensitive aunque `Service.name` es una unique key case-sensitive asignada por upsert
+  exacto al ingestar (decisión #11) — son problemas distintos (ingesta vs. filtro de listado).
+  `?search=` vacío se rechaza con 400 en vez de interpretarse como "sin filtro". `search` no tiene
+  ningún índice detrás (no hay `ILIKE`/full-text en ningún otro lado del proyecto) — aceptable a
+  esta escala, se agregó un ítem nuevo en §8 para un índice `pg_trgm`/GIN o mover la búsqueda a
+  Elasticsearch en producción, mismo tratamiento que ya reciben la paginación por offset y el test
+  de carga de la cola.
+- **Pendiente de revisar**: health check (`GET /api/health`) y el reintento "con corrección" del
+  LLM, en ese orden, según lo acordado con el autor.

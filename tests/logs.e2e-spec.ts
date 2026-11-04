@@ -97,4 +97,29 @@ describe('Logs (e2e)', () => {
 
     expect(response.headers['content-type']).toContain('application/problem+json');
   });
+
+  it('filters /api/logs by service and level together', async () => {
+    await request(app.getHttpServer())
+      .post('/api/logs')
+      .send({ service: 'payments-api', level: 'WARN', message: 'slow response' })
+      .expect(201);
+
+    const response = await request(app.getHttpServer())
+      .get('/api/logs')
+      .query({ service: 'PAYMENTS-API', level: 'WARN' })
+      .expect(200);
+
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0].service).toBe('payments-api');
+    expect(response.body.data[0].message).toBe('slow response');
+  });
+
+  it('rejects /api/logs when from is after to', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/logs')
+      .query({ from: '2026-02-01', to: '2026-01-01' })
+      .expect(400);
+
+    expect(response.headers['content-type']).toContain('application/problem+json');
+  });
 });

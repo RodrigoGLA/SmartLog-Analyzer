@@ -107,6 +107,80 @@ describe('LogsService', () => {
     expect(result.meta).toEqual({ page: 2, limit: 10, total: 42 });
     expect(result.data[0].service).toBe('db-proxy');
     expect(result.data[0].id).toBe('1');
+    expect(prisma.log.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: {} }),
+    );
+    expect(prisma.log.count).toHaveBeenCalledWith({ where: {} });
+  });
+
+  it('filters by service name, case-insensitively', async () => {
+    prisma.$transaction.mockResolvedValue([[], 0]);
+
+    await service.findAll({ page: 1, limit: 20, service: 'checkout-api' });
+
+    const expectedWhere = { service: { name: { equals: 'checkout-api', mode: 'insensitive' } } };
+    expect(prisma.log.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expectedWhere }));
+    expect(prisma.log.count).toHaveBeenCalledWith({ where: expectedWhere });
+  });
+
+  it('filters by level', async () => {
+    prisma.$transaction.mockResolvedValue([[], 0]);
+
+    await service.findAll({ page: 1, limit: 20, level: LogLevel.ERROR });
+
+    const expectedWhere = { level: LogLevel.ERROR };
+    expect(prisma.log.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expectedWhere }));
+  });
+
+  it('filters by a from/to date range', async () => {
+    prisma.$transaction.mockResolvedValue([[], 0]);
+    const from = '2026-01-01T00:00:00.000Z';
+    const to = '2026-01-02T00:00:00.000Z';
+
+    await service.findAll({ page: 1, limit: 20, from, to });
+
+    expect(prisma.log.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { timestamp: { gte: new Date(from), lte: new Date(to) } },
+      }),
+    );
+  });
+
+  it('filters by a search substring on the message, case-insensitively', async () => {
+    prisma.$transaction.mockResolvedValue([[], 0]);
+
+    await service.findAll({ page: 1, limit: 20, search: 'timeout' });
+
+    const expectedWhere = { message: { contains: 'timeout', mode: 'insensitive' } };
+    expect(prisma.log.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expectedWhere }));
+  });
+
+  it('combines multiple filters into a single where clause', async () => {
+    prisma.$transaction.mockResolvedValue([[], 0]);
+
+    await service.findAll({ page: 1, limit: 20, level: LogLevel.ERROR, search: 'timeout' });
+
+    expect(prisma.log.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { level: LogLevel.ERROR, message: { contains: 'timeout', mode: 'insensitive' } },
+      }),
+    );
+  });
+
+  it('returns an empty page when a filter matches no logs', async () => {
+    prisma.$transaction.mockResolvedValue([[], 0]);
+
+    const result = await service.findAll({ page: 1, limit: 20, service: 'nonexistent-service' });
+
+    expect(result.data).toEqual([]);
+    expect(result.meta.total).toBe(0);
+  });
+
+  it('rejects a from/to range on findAll where from is after to', async () => {
+    await expect(
+      service.findAll({ page: 1, limit: 20, from: '2026-02-01', to: '2026-01-01' }),
+    ).rejects.toThrow('`from` must be earlier than or equal to `to`');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('groups stats by level', async () => {
