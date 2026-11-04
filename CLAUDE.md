@@ -128,22 +128,49 @@ Cada etapa termina con tests en verde y uno o más commits.
       - Base HTTP: prefijo `/api`, `ValidationPipe` global, filtro global RFC 9457.
       - Logs básico: `POST /api/logs` (upsert de servicio), `GET /api/logs` paginado. Unit +
         integración (Testcontainers) con casos borde.
-      - **Diferido dentro de esta etapa** (se suman cuando se retome el resto de logs): seed
-        realista, filtros avanzados y `GET /api/logs/stats`, health check con terminus, Dockerfile
-        de la app.
-- [ ] **2. Logs — resto**: filtros (`service`, `level`, `from`, `to`, `search`), `GET
-      /api/logs/stats`, seed realista (4–5 servicios, ráfagas de errores repetidos, un incidente
-      encadenado entre servicios), health check con terminus.
-- [ ] **3. LLM (aislado)**: interfaz, schema Zod de respuesta, `LogPreprocessor` (normalizar,
+      - Seed de ejemplo (`db/seed.ts`, registrado en `prisma.config.ts#migrations.seed`): 12
+        servicios simulando AWS/Azure/GCP/on-prem, ~4800 logs con metadata realista por proveedor
+        y ráfagas de error, idempotente (`npm run db:seed`). Adelantado desde la Etapa 2 porque el
+        enunciado lo pide explícitamente ("scripts de migración y seed con datos de ejemplo").
+      - **Diferido dentro de esta etapa** (se suman cuando se retome el resto de logs): filtros
+        avanzados y `GET /api/logs/stats`, health check con terminus, Dockerfile de la app.
+- [ ] **2. Logs — resto**:
+      - `GET /api/logs/stats?groupBy=service|level&from=&to=` (consulta de agregación — requisito
+        explícito del enunciado) — **hecho**. Un solo `groupBy` por request, sin bucketing por
+        intervalo todavía (decisión #20 en `ARCHITECTURE.md`).
+      - Filtros en `GET /api/logs` (`service`, `level`, `from`, `to`, `search`) — pendiente.
+      - Health check con terminus — pendiente.
+      - `interval` (hora/día) en `/api/logs/stats` — pendiente, opcional si da el tiempo.
+      - Swagger/OpenAPI (`@nestjs/swagger`, servido en `/docs`) — **hecho**, adelantado desde la
+        Etapa 6 para tener documentación interactiva mientras se suman endpoints (decisión #22).
+- [x] **3. LLM (aislado)**: interfaz, schema Zod de respuesta, `LogPreprocessor` (normalizar,
       agrupar, recortar, enmascarar), prompt, `MockLlmProvider` con escenarios. Tests: respuesta
-      válida, formato inesperado y timeout.
-- [ ] **4. Análisis**: `POST /api/logs/analyze` (202), worker pg-boss, persistencia de resultados y
-      findings, `GET /api/analysis/:id`. Tests de integración del flujo completo con el mock.
-      También se agrega a la validación de env vars `LLM_PROVIDER`/`LLM_TIMEOUT_MS`/
-      `ANALYSIS_MAX_PATTERNS`/`ANALYSIS_MAX_RANGE_HOURS` (ver decisión #15).
-- [ ] **5. Proveedor real**: `GeminiLlmProvider` con salida estructurada nativa + misma validación.
-      Se agrega `LLM_API_KEY`/`LLM_MODEL` a la validación de env vars.
-- [ ] **6. Cierre**: Swagger, README completo (levantar, testear, uso de IA, pendientes), Dockerfile
+      válida, formato inesperado y timeout. `finding_category` libre, guiada por prompt (decisión
+      #24), no un enum cerrado.
+- [x] **4. Análisis**: `POST /api/logs/analyze` (202), worker pg-boss real, persistencia de
+      resultados y findings, `GET /api/analysis/:id`. Test e2e del flujo completo con el mock
+      (`tests/analysis.e2e-spec.ts`), incluyendo el caso 422 sin logs en rango y un caso de
+      recuperación tras una falla transitoria (reintento automático de pg-boss, decisión #24).
+      Se agregó a la validación de env vars `LLM_TIMEOUT_MS`/`ANALYSIS_MAX_PATTERNS`/
+      `ANALYSIS_MAX_RANGE_HOURS` (decisión #15); `LLM_PROVIDER`/`LLM_API_KEY`/`LLM_MODEL` quedan
+      para la Etapa 5, junto con `GeminiLlmProvider`.
+      - Cola pg-boss creada y verificada (`src/queue/`: `QueueModule`, `PgBossService`, constante
+        `ANALYSIS_QUEUE`), con política de reintentos explícita (decisión #24) — **hecho**.
+      - El worker real vive en `src/analysis/` (`AnalysisWorkerService`), no en `src/queue/`,
+        respetando la decisión #23. `tests/queue.e2e-spec.ts` (el test de pickup "de prueba" de la
+        vuelta anterior) se eliminó al quedar superado por este worker real y su propio e2e
+        (decisión #24) — ambos competían por la misma cola al convivir en el mismo `AppModule`.
+- [x] **5. Proveedor real**: `GeminiLlmProvider` con salida estructurada nativa (`fetch` + `responseSchema`
+      escrito a mano, decisión #25) + misma validación Zod que ya usa el mock. `LLM_PROVIDER`/
+      `LLM_API_KEY`/`LLM_MODEL` agregadas a la validación de env vars, `LLM_API_KEY` obligatoria
+      solo si `LLM_PROVIDER=gemini`. `llm.module.ts` elige el provider por esa env var. Probado
+      de punta a punta contra la API real (no solo con tests): `POST /api/logs/analyze` →
+      `AnalysisWorkerService` → Gemini → `GET /api/analysis/:id` con `completed` y findings reales.
+      Idea anotada (fuera de git, `.claude/notes/analysis-worker-flow.md`): reintento "con
+      corrección" ante `LLM_INVALID_RESPONSE`, reenviando el prompt 1-2 veces con el error de Zod
+      antes de rendirse — evaluada y **diferida** a pedido del autor, no implementada en esta
+      vuelta.
+- [ ] **6. Cierre**: README completo (levantar, testear, uso de IA, pendientes), Dockerfile
       multi-stage de la app + `docker-compose.yml` final (app + db), revisión de ARCHITECTURE.md,
       verificación final (`docker compose up` desde cero, sin secretos en git).
 - [ ] **Extras (si hay tiempo)**: CI con GitHub Actions, Makefile, logging estructurado (pino),

@@ -1,10 +1,14 @@
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { ProblemDetailsFilter } from '../src/common/filters/problem-details.filter.js';
+import type { EnvironmentVariables } from '../src/config/env.schema.js';
+import { PrismaService } from '../src/database/prisma.service.js';
+import { PgBossService } from '../src/queue/pg-boss.service.js';
 import { startTestPostgres } from './setup/postgres-test-container.js';
 
 describe('Logs (e2e)', () => {
@@ -13,9 +17,23 @@ describe('Logs (e2e)', () => {
 
   beforeAll(async () => {
     container = await startTestPostgres();
-    process.env.DATABASE_URL = container.getConnectionUri();
 
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    // `ConfigModule.forRoot` valida el entorno al importar `AppModule`, antes de que este
+    // `beforeAll` llegue a correr — pisar `process.env.DATABASE_URL` acá llega demasiado tarde
+    // para que lo vea. En vez de pelear con ese timing, se reemplazan directamente los providers
+    // de `PrismaService` y `PgBossService` por instancias apuntadas al Postgres efímero de
+    // Testcontainers (sin pisar `PgBossService` también, este test conectaba en silencio a la
+    // Postgres real de dev en el puerto 5432, tal como `PrismaService` antes de la decisión #21).
+    const testConfig = {
+      get: () => container.getConnectionUri(),
+    } as unknown as ConfigService<EnvironmentVariables, true>;
+
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(PrismaService)
+      .useValue(new PrismaService(testConfig))
+      .overrideProvider(PgBossService)
+      .useValue(new PgBossService(testConfig))
+      .compile();
 
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api');
@@ -53,5 +71,30 @@ describe('Logs (e2e)', () => {
 
     expect(response.headers['content-type']).toContain('application/problem+json');
     expect(response.body.errors).toBeDefined();
+  });
+
+  it('aggregates logs by service via /api/logs/stats', async () => {
+    await request(app.getHttpServer())
+      .post('/api/logs')
+      .send({ service: 'checkout-api', level: 'ERROR', message: 'second error' })
+      .expect(201);
+
+    const response = await request(app.getHttpServer())
+      .get('/api/logs/stats')
+      .query({ groupBy: 'service' })
+      .expect(200);
+
+    expect(response.body.groupBy).toBe('service');
+    const checkout = response.body.data.find((entry: { key: string }) => entry.key === 'checkout-api');
+    expect(checkout.count).toBe(2);
+  });
+
+  it('rejects /api/logs/stats when from is after to', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/logs/stats')
+      .query({ groupBy: 'level', from: '2026-02-01', to: '2026-01-01' })
+      .expect(400);
+
+    expect(response.headers['content-type']).toContain('application/problem+json');
   });
 });

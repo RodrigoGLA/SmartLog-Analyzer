@@ -17,6 +17,7 @@ Thumbs.db
 
 .vscode/
 .idea/
+.claude/
 
 # Secretos / overrides locales que no deben compartirse
 .npmrc

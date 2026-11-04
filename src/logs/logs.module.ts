@@ -5,5 +5,6 @@ import { LogsService } from './logs.service.js';
 @Module({
   controllers: [LogsController],
   providers: [LogsService],
+  exports: [LogsService],
 })
 export class LogsModule {}
