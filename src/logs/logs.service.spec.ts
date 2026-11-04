@@ -148,4 +148,45 @@ describe('LogsService', () => {
     ).rejects.toThrow('`from` must be earlier than or equal to `to`');
     expect(prisma.log.groupBy).not.toHaveBeenCalled();
   });
+
+  it('countForAnalysis builds a where clause from the range and optional filters', async () => {
+    prisma.log.count.mockResolvedValue(7);
+    const from = new Date('2026-01-01T00:00:00.000Z');
+    const to = new Date('2026-01-02T00:00:00.000Z');
+
+    const result = await service.countForAnalysis({ from, to, services: [1, 2], levels: [LogLevel.ERROR] });
+
+    expect(result).toBe(7);
+    expect(prisma.log.count).toHaveBeenCalledWith({
+      where: {
+        timestamp: { gte: from, lte: to },
+        serviceId: { in: [1, 2] },
+        level: { in: [LogLevel.ERROR] },
+      },
+    });
+  });
+
+  it('findManyForAnalysis flattens service name into each row', async () => {
+    const from = new Date('2026-01-01T00:00:00.000Z');
+    const to = new Date('2026-01-02T00:00:00.000Z');
+    prisma.log.findMany.mockResolvedValue([
+      {
+        serviceId: 1,
+        level: LogLevel.ERROR,
+        message: 'boom',
+        timestamp: from,
+        service: { name: 'checkout-api' },
+      },
+    ]);
+
+    const result = await service.findManyForAnalysis({ from, to });
+
+    expect(result).toEqual([
+      { serviceId: 1, serviceName: 'checkout-api', level: LogLevel.ERROR, message: 'boom', timestamp: from },
+    ]);
+    expect(prisma.log.findMany).toHaveBeenCalledWith({
+      where: { timestamp: { gte: from, lte: to } },
+      include: { service: true },
+    });
+  });
 });

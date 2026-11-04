@@ -143,21 +143,27 @@ Cada etapa termina con tests en verde y uno o más commits.
       - `interval` (hora/día) en `/api/logs/stats` — pendiente, opcional si da el tiempo.
       - Swagger/OpenAPI (`@nestjs/swagger`, servido en `/docs`) — **hecho**, adelantado desde la
         Etapa 6 para tener documentación interactiva mientras se suman endpoints (decisión #22).
-- [ ] **3. LLM (aislado)**: interfaz, schema Zod de respuesta, `LogPreprocessor` (normalizar,
+- [x] **3. LLM (aislado)**: interfaz, schema Zod de respuesta, `LogPreprocessor` (normalizar,
       agrupar, recortar, enmascarar), prompt, `MockLlmProvider` con escenarios. Tests: respuesta
-      válida, formato inesperado y timeout.
-- [ ] **4. Análisis**: `POST /api/logs/analyze` (202), worker pg-boss, persistencia de resultados y
-      findings, `GET /api/analysis/:id`. Tests de integración del flujo completo con el mock.
-      También se agrega a la validación de env vars `LLM_PROVIDER`/`LLM_TIMEOUT_MS`/
-      `ANALYSIS_MAX_PATTERNS`/`ANALYSIS_MAX_RANGE_HOURS` (ver decisión #15).
+      válida, formato inesperado y timeout. `finding_category` libre, guiada por prompt (decisión
+      #24), no un enum cerrado.
+- [x] **4. Análisis**: `POST /api/logs/analyze` (202), worker pg-boss real, persistencia de
+      resultados y findings, `GET /api/analysis/:id`. Test e2e del flujo completo con el mock
+      (`tests/analysis.e2e-spec.ts`), incluyendo el caso 422 sin logs en rango y un caso de
+      recuperación tras una falla transitoria (reintento automático de pg-boss, decisión #24).
+      Se agregó a la validación de env vars `LLM_TIMEOUT_MS`/`ANALYSIS_MAX_PATTERNS`/
+      `ANALYSIS_MAX_RANGE_HOURS` (decisión #15); `LLM_PROVIDER`/`LLM_API_KEY`/`LLM_MODEL` quedan
+      para la Etapa 5, junto con `GeminiLlmProvider`.
       - Cola pg-boss creada y verificada (`src/queue/`: `QueueModule`, `PgBossService`, constante
-        `ANALYSIS_QUEUE`) — **hecho**. Test e2e (`tests/queue.e2e-spec.ts`) prueba que un worker
-        registrado recibe un job enviado (decisión #23). Sin worker placeholder en el arranque a
-        propósito — se evita a futuro un doble `.work()` compitiendo por la cola.
-      - Pendiente: worker real de análisis, persistencia de `Analysis`/`AnalysisFinding`,
-        endpoints `POST /api/logs/analyze` y `GET /api/analysis/:id`.
+        `ANALYSIS_QUEUE`), con política de reintentos explícita (decisión #24) — **hecho**.
+      - El worker real vive en `src/analysis/` (`AnalysisWorkerService`), no en `src/queue/`,
+        respetando la decisión #23. `tests/queue.e2e-spec.ts` (el test de pickup "de prueba" de la
+        vuelta anterior) se eliminó al quedar superado por este worker real y su propio e2e
+        (decisión #24) — ambos competían por la misma cola al convivir en el mismo `AppModule`.
 - [ ] **5. Proveedor real**: `GeminiLlmProvider` con salida estructurada nativa + misma validación.
-      Se agrega `LLM_API_KEY`/`LLM_MODEL` a la validación de env vars.
+      Se agrega `LLM_PROVIDER`/`LLM_API_KEY`/`LLM_MODEL` a la validación de env vars. Idea anotada
+      (fuera de git, `.claude/notes/analysis-worker-flow.md`): reintento "con corrección" ante
+      `LLM_INVALID_RESPONSE`, reenviando el prompt 1-2 veces con el error de Zod antes de rendirse.
 - [ ] **6. Cierre**: README completo (levantar, testear, uso de IA, pendientes), Dockerfile
       multi-stage de la app + `docker-compose.yml` final (app + db), revisión de ARCHITECTURE.md,
       verificación final (`docker compose up` desde cero, sin secretos en git).

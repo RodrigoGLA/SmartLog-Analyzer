@@ -15,7 +15,13 @@ export class PgBossService extends PgBoss implements OnModuleInit, OnModuleDestr
 
   async onModuleInit(): Promise<void> {
     await this.start();
-    await this.createQueue(ANALYSIS_QUEUE);
+    await this.createQueue(ANALYSIS_QUEUE, {
+      retryLimit: 3,
+      retryBackoff: true,
+      // pg-boss defaults to 900s; the worker's own LLM_TIMEOUT_MS bounds the handler well
+      // below this, so a job stuck this long only happens if the handler itself hangs.
+      expireInSeconds: 60,
+    });
   }
 
   async onModuleDestroy(): Promise<void> {

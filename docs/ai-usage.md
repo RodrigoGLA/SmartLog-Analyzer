@@ -218,3 +218,55 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
   (`npm run start:dev`), sin errores.
 - **Pendiente de revisar**: la implementación real del análisis (worker, `LlmProvider`,
   persistencia de `Analysis`/`AnalysisFinding`, endpoints) queda para la próxima vuelta.
+
+### 2026-11-04 — Worker real de análisis (Etapas 3 y 4): LLM aislado, cola con reintentos y endpoints
+- **Pedido**: implementar la lógica real de análisis que la vuelta anterior dejó pendiente: la
+  capa LLM aislada (interfaz, schema Zod, preprocesador de logs, mock) y el worker real que
+  consume la cola, persiste resultados y expone `POST /api/logs/analyze` / `GET /api/analysis/:id`.
+  Antes de escribir código se repasó en conversación qué significan "job" vs. "worker" en pg-boss,
+  y se profundizó en tolerancia a fallas (reintentos, idempotencia) a pedido explícito del autor.
+- **Aporte**: `zod` instalado (versión estable verificada contra el registro de npm, misma
+  disciplina que con Prisma/pg-boss). `src/llm/` (capa aislada, sin dependencias de Nest/DB):
+  `LlmProvider` (interfaz + `name` de solo lectura, para que el worker registre el proveedor sin
+  confiar en lo que diga el propio LLM), `analysisResultSchema` (Zod), `LogPreprocessor`
+  (enmascara y agrupa logs en patrones por servicio+nivel+mensaje normalizado, ordenados por
+  severidad y frecuencia, acotados a `ANALYSIS_MAX_PATTERNS`), `prompt.ts`, `MockLlmProvider` con
+  3 escenarios (éxito/formato inválido/timeout, este último con fake timers en los tests). `src/
+  analysis/`: `AnalysisService` (valida rango, `ANALYSIS_MAX_RANGE_HOURS`, 422 sin logs),
+  `AnalysisWorkerService` (el `.work()` real, con guard de idempotencia, timeout centralizado vía
+  `Promise.race`, y el mapeo de los 3 códigos de error `LLM_*`), y los dos controllers. Se agregó
+  `LogsService.findManyForAnalysis`/`countForAnalysis` (no existía ningún filtrado por rango
+  todavía en `LogsService`, más allá de paginar). Política de reintentos explícita en
+  `createQueue` (`retryLimit: 3`, `retryBackoff: true`, `expireInSeconds: 60`, verificada contra
+  `node_modules/pg-boss/dist/types.d.ts` en vez de asumir los defaults). Antes de escribir el
+  schema Zod y el worker se corrió un chequeo manual (`node -e`) contra la API real de Zod v4
+  instalada, porque cambió bastante respecto a v3.
+- **Corregido**: durante la implementación, el disco `C:` se quedó literalmente en 0 MB libres y
+  `npm install` falló con `ENOSPC` — se avisó al autor en vez de borrar nada, y se retomó una vez
+  liberó espacio. Al reiniciar la máquina para resolver eso, Docker Desktop quedó abajo y el
+  contenedor `smartlog-analyzer-db-1` (Postgres de dev) se detuvo; al correr los e2e después del
+  reinicio, `tests/logs.e2e-spec.ts` falló con `ECONNREFUSED` en el puerto 5432 — y ahí se encontró
+  un bug real preexistente (de la vuelta de la cola, no de esta): ese test nunca pisaba
+  `PgBossService` con `overrideProvider`, solo `PrismaService`. Pasaba en silencio porque
+  `PgBossService` (sin pisar) terminaba conectándose a la Postgres real de dev en el puerto 5432,
+  y esa Postgres resultaba estar arriba las veces que corrió antes — la misma clase de bug que la
+  decisión #21, pero para la cola en vez de para Prisma. Se corrigió agregando el mismo
+  `overrideProvider(PgBossService)` que ya usan `analysis.e2e-spec.ts` y el `queue.e2e-spec.ts`
+  descartado. Por otro lado, ese mismo `tests/queue.e2e-spec.ts` registraba su
+  propio `.work()` de prueba importando `AppModule` completo; al existir ahora `AnalysisWorkerService`
+  registrado sobre la misma cola en ese mismo `AppModule`, ambos quedaban compitiendo por los
+  mismos jobs — el escenario de doble consumidor que la decisión #23 había anticipado, ahora real.
+  Se eliminó ese test: su propósito (¿algún worker toma un job?) quedó cubierto por
+  `tests/analysis.e2e-spec.ts`, que prueba el worker real end-to-end.
+- **Decisión propia**: documentada como decisión #24 en `ARCHITECTURE.md` — `finding_category`
+  libre (guiada por prompt, no un enum cerrado en Zod), los 3 errores `LLM_*` se atrapan en el
+  worker y no activan retry de pg-boss (ya son un resultado de negocio terminal), cualquier otro
+  error se deja propagar para que pg-boss reintente, y el guard de idempotencia evita findings
+  duplicados ante un reintento que llega después de un intento previo ya resuelto. El test e2e de
+  reintento (`tests/analysis.e2e-spec.ts`) usa la política real de la cola de punta a punta (vía
+  `POST /api/logs/analyze`), en vez de pasar opciones de reintento por job — más simple y más fiel
+  a lo que corre en producción.
+- **Pendiente de revisar**: `GeminiLlmProvider` (Etapa 5), con el reintento "con corrección" ante
+  `LLM_INVALID_RESPONSE` anotado como idea en `.claude/notes/analysis-worker-flow.md` (fuera de
+  git); confirmar con el autor si el worker debería loggear/alertar cuando se agotan los 3
+  reintentos de pg-boss (hoy el `Analysis` queda silenciosamente en `processing`).

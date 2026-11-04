@@ -8,6 +8,7 @@ import { AppModule } from '../src/app.module.js';
 import { ProblemDetailsFilter } from '../src/common/filters/problem-details.filter.js';
 import type { EnvironmentVariables } from '../src/config/env.schema.js';
 import { PrismaService } from '../src/database/prisma.service.js';
+import { PgBossService } from '../src/queue/pg-boss.service.js';
 import { startTestPostgres } from './setup/postgres-test-container.js';
 
 describe('Logs (e2e)', () => {
@@ -19,8 +20,10 @@ describe('Logs (e2e)', () => {
 
     // `ConfigModule.forRoot` valida el entorno al importar `AppModule`, antes de que este
     // `beforeAll` llegue a correr — pisar `process.env.DATABASE_URL` acá llega demasiado tarde
-    // para que lo vea. En vez de pelear con ese timing, se reemplaza directamente el provider de
-    // `PrismaService` por una instancia apuntada al Postgres efímero de Testcontainers.
+    // para que lo vea. En vez de pelear con ese timing, se reemplazan directamente los providers
+    // de `PrismaService` y `PgBossService` por instancias apuntadas al Postgres efímero de
+    // Testcontainers (sin pisar `PgBossService` también, este test conectaba en silencio a la
+    // Postgres real de dev en el puerto 5432, tal como `PrismaService` antes de la decisión #21).
     const testConfig = {
       get: () => container.getConnectionUri(),
     } as unknown as ConfigService<EnvironmentVariables, true>;
@@ -28,6 +31,8 @@ describe('Logs (e2e)', () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PrismaService)
       .useValue(new PrismaService(testConfig))
+      .overrideProvider(PgBossService)
+      .useValue(new PgBossService(testConfig))
       .compile();
 
     app = moduleRef.createNestApplication();

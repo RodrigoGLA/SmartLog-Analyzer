@@ -1,9 +1,17 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { Log, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service.js';
+import type { RawLogForAnalysis } from '../llm/log-preprocessor.js';
 import type { CreateLogDto } from './dto/create-log.dto.js';
 import type { ListLogsQueryDto } from './dto/list-logs-query.dto.js';
 import type { StatsGroupBy, StatsQueryDto } from './dto/stats-query.dto.js';
+
+export interface AnalysisLogFilters {
+  from: Date;
+  to: Date;
+  services?: number[];
+  levels?: Log['level'][];
+}
 
 export interface LogResponse {
   id: string;
@@ -98,6 +106,33 @@ export class LogsService {
       from: query.from ?? null,
       to: query.to ?? null,
       data: data.sort((a, b) => b.count - a.count),
+    };
+  }
+
+  async countForAnalysis(filters: AnalysisLogFilters): Promise<number> {
+    return this.prisma.log.count({ where: this.buildAnalysisWhere(filters) });
+  }
+
+  async findManyForAnalysis(filters: AnalysisLogFilters): Promise<RawLogForAnalysis[]> {
+    const logs = await this.prisma.log.findMany({
+      where: this.buildAnalysisWhere(filters),
+      include: { service: true },
+    });
+
+    return logs.map((log) => ({
+      serviceId: log.serviceId,
+      serviceName: log.service.name,
+      level: log.level,
+      message: log.message,
+      timestamp: log.timestamp,
+    }));
+  }
+
+  private buildAnalysisWhere(filters: AnalysisLogFilters): Prisma.LogWhereInput {
+    return {
+      timestamp: { gte: filters.from, lte: filters.to },
+      ...(filters.services?.length ? { serviceId: { in: filters.services } } : {}),
+      ...(filters.levels?.length ? { level: { in: filters.levels } } : {}),
     };
   }
 
