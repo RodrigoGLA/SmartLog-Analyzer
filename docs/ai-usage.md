@@ -270,3 +270,49 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
   `LLM_INVALID_RESPONSE` anotado como idea en `.claude/notes/analysis-worker-flow.md` (fuera de
   git); confirmar con el autor si el worker debería loggear/alertar cuando se agotan los 3
   reintentos de pg-boss (hoy el `Analysis` queda silenciosamente en `processing`).
+
+### 2026-11-04 — `GeminiLlmProvider` (Etapa 5): proveedor real detrás de la misma interfaz
+- **Pedido**: el autor generó una API key de Gemini (Google AI Studio, capa gratuita) y la puso en
+  su `.env`, y pidió planificar e implementar el proveedor real. Antes de escribir código, preguntó
+  explícitamente qué forma tiene la respuesta del LLM (para entender el contrato) y pidió planear
+  los tests — se usó `/plan` para esto: dos subagentes (`Explore` para relevar el estado exacto del
+  código, `Plan` para diseñar la implementación) y una pregunta al autor sobre si implementar el
+  reintento "con corrección" ahora (eligió diferirlo).
+- **Aporte**: `src/llm/gemini-llm-provider.ts` — `fetch` nativo (decisión #13), autenticación por
+  header `x-goog-api-key` (nunca en la URL), `responseSchema` de Gemini escrito a mano (ver
+  decisión #25: `z.toJSONSchema()` no es compatible con el subset que acepta Gemini), timeout
+  propio con `AbortSignal.timeout` (Node 26), y todo error normalizado a los 3 `LlmError` ya
+  existentes para no disparar el retry de pg-boss por accidente (decisión #24, reafirmada para el
+  proveedor real en la #25). `llm.module.ts` pasa a un `useFactory` que elige `MockLlmProvider` o
+  `GeminiLlmProvider` según la nueva env var `LLM_PROVIDER` (default `mock`); `LLM_API_KEY` se
+  vuelve obligatoria solo si `LLM_PROVIDER=gemini` (`@ValidateIf`). 11 tests unitarios con `fetch`
+  mockeado (`vi.stubGlobal`): éxito, HTTP no-2xx, red caída, timeout/abort (los dos nombres de
+  error reales de Node), contenido bloqueado, JSON malformado, body no-JSON, y la forma exacta del
+  request (URL, header, prompts, `responseSchema`).
+- **Corregido**: antes de escribir el código se hizo una llamada real a la API (con la key del
+  autor, sin loguearla) para verificar el contrato vigente — misma disciplina que ya se usó para
+  Zod/Prisma/pg-boss — y salió un hallazgo real: **`gemini-2.5-flash` (el default que ya estaba
+  documentado) fue retirado por Google para API keys nuevas**, igual que `gemini-2.0-flash` y
+  `gemini-2.5-flash-lite`; el mensaje de error de la propia API sugería `gemini-3.8-flash` o
+  `gemini-3.5-flash-lite` como reemplazo. Se probaron varios nombres en vivo; `gemini-3.5-flash-lite`
+  respondió con éxito, incluyendo la salida estructurada completa contra nuestro `responseSchema`
+  (confirmado con un análisis real de ejemplo, no solo un "OK" de prueba) — se usó como nuevo
+  default en `env.schema.ts`/`.env.example`. Durante la verificación manual de punta a punta
+  (`POST /api/logs/analyze` → worker → Gemini → `GET /api/analysis/:id`) aparecieron dos problemas
+  más, ninguno del código de la app: (1) la capa gratuita de ese modelo mostró latencia muy
+  variable — desde ~1s hasta más de 20s para pedidos chicos — lo que hizo que los primeros dos
+  intentos terminaran en `LLM_TIMEOUT` real (confirmando que ese camino de error funciona
+  correctamente de punta a punta, aunque no era el objetivo de esa corrida); (2) al subir
+  `LLM_TIMEOUT_MS` a mano en el `.env` local para una corrida con más margen, un `echo >> .env` se
+  pegó sin salto de línea al final de `LLM_MODEL` (el archivo no terminaba con newline), generando
+  silenciosamente un nombre de modelo inválido (`gemini-3.5-flash-liteLLM_TIMEOUT_MS=60000`) y un
+  `400 INVALID_ARGUMENT` de Gemini — se detectó revisando el archivo con `cat -A`, se corrigió el
+  salto de línea faltante, y una corrida posterior con el `.env` ya sano terminó en `completed` con
+  hallazgos reales y coherentes (categorías libres como `dependency-failure`/`security`, severidad
+  `CRITICAL` en los casos que correspondía).
+- **Decisión propia**: documentada como decisión #25 en `ARCHITECTURE.md`. El default de código de
+  `LLM_TIMEOUT_MS` queda en `20000` sin cambios (razonable para un tier de producción más estable);
+  la variabilidad observada es específica de la capa gratuita de este modelo en este momento, no
+  un problema del diseño — se documenta como una nota para quien reproduzca esto en desarrollo.
+- **Pendiente de revisar**: el reintento "con corrección" ante `LLM_INVALID_RESPONSE` sigue
+  anotado y diferido (confirmado explícitamente con el autor esta vuelta, no implementado).

@@ -160,10 +160,16 @@ Cada etapa termina con tests en verde y uno o más commits.
         respetando la decisión #23. `tests/queue.e2e-spec.ts` (el test de pickup "de prueba" de la
         vuelta anterior) se eliminó al quedar superado por este worker real y su propio e2e
         (decisión #24) — ambos competían por la misma cola al convivir en el mismo `AppModule`.
-- [ ] **5. Proveedor real**: `GeminiLlmProvider` con salida estructurada nativa + misma validación.
-      Se agrega `LLM_PROVIDER`/`LLM_API_KEY`/`LLM_MODEL` a la validación de env vars. Idea anotada
-      (fuera de git, `.claude/notes/analysis-worker-flow.md`): reintento "con corrección" ante
-      `LLM_INVALID_RESPONSE`, reenviando el prompt 1-2 veces con el error de Zod antes de rendirse.
+- [x] **5. Proveedor real**: `GeminiLlmProvider` con salida estructurada nativa (`fetch` + `responseSchema`
+      escrito a mano, decisión #25) + misma validación Zod que ya usa el mock. `LLM_PROVIDER`/
+      `LLM_API_KEY`/`LLM_MODEL` agregadas a la validación de env vars, `LLM_API_KEY` obligatoria
+      solo si `LLM_PROVIDER=gemini`. `llm.module.ts` elige el provider por esa env var. Probado
+      de punta a punta contra la API real (no solo con tests): `POST /api/logs/analyze` →
+      `AnalysisWorkerService` → Gemini → `GET /api/analysis/:id` con `completed` y findings reales.
+      Idea anotada (fuera de git, `.claude/notes/analysis-worker-flow.md`): reintento "con
+      corrección" ante `LLM_INVALID_RESPONSE`, reenviando el prompt 1-2 veces con el error de Zod
+      antes de rendirse — evaluada y **diferida** a pedido del autor, no implementada en esta
+      vuelta.
 - [ ] **6. Cierre**: README completo (levantar, testear, uso de IA, pendientes), Dockerfile
       multi-stage de la app + `docker-compose.yml` final (app + db), revisión de ARCHITECTURE.md,
       verificación final (`docker compose up` desde cero, sin secretos en git).
