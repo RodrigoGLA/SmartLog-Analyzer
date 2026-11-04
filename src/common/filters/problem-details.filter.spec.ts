@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import type { ArgumentsHost } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { ProblemDetailsFilter } from './problem-details.filter.js';
@@ -54,5 +54,23 @@ describe('ProblemDetailsFilter', () => {
     expect(body.title).toBe('Internal Server Error');
     expect(body.detail).toBeUndefined();
     expect(JSON.stringify(body)).not.toContain('secret stack trace detail');
+  });
+
+  it('maps a terminus HealthCheckResult failure to 503 with which indicator failed', () => {
+    const filter = new ProblemDetailsFilter();
+    const exception = new ServiceUnavailableException({
+      status: 'error',
+      info: {},
+      error: { database: { status: 'down', message: 'connection refused' } },
+      details: { database: { status: 'down', message: 'connection refused' } },
+    });
+    const { host, status, send } = createHost('/api/health');
+
+    filter.catch(exception, host);
+
+    expect(status).toHaveBeenCalledWith(503);
+    const body = send.mock.calls[0][0];
+    expect(body.title).toBe('Service Unavailable');
+    expect(body.errors).toEqual(['database: connection refused']);
   });
 });

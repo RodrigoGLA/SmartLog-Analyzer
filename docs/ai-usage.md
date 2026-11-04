@@ -351,3 +351,41 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
   de carga de la cola.
 - **Pendiente de revisar**: health check (`GET /api/health`) y el reintento "con corrección" del
   LLM, en ese orden, según lo acordado con el autor.
+
+### 2026-11-04 — `GET /api/health` con `@nestjs/terminus`
+- **Pedido**: el autor pidió comitear/pushear el trabajo de filtros y seguir con el health check,
+  preguntando primero qué es un health check (se le explicó en el chat: un endpoint que consultan
+  sistemas automáticos — orquestadores, balanceadores, monitoreo — para saber si el servicio está
+  sano, no una pantalla para una persona). Pidió explícitamente no planificar con `/plan` esta vez
+  ("confío en tu criterio... solo cuando termines explicame el flujo"), así que se implementó
+  directo sin pasar por modo plan.
+- **Aporte**: `GET /api/health` vía `@nestjs/terminus` (`HealthModule`/`HealthController` en
+  `src/health/`), usando el `PrismaHealthIndicator` ya incluido en el paquete (hace
+  `$queryRawUnsafe('SELECT 1')` con timeout de 1s) contra `PrismaService` — no se escribió el ping
+  a mano. `ProblemDetailsFilter` se extendió con un caso para la forma particular que usa el
+  `HealthCheckResult` que lanza terminus (`status` + `details`, sin `message`/`error` como el resto
+  de las `HttpException`), listando en `errors` qué indicador falló y por qué, para no perder esa
+  información al envolverla en el mismo `application/problem+json` que ya usa toda la API. Tests:
+  2 unitarios en `health.controller.spec.ts` (ok con la base arriba, `ServiceUnavailableException`
+  con la base abajo, mockeando `PrismaService` pero compilando el módulo real de terminus) + 1 caso
+  nuevo en `problem-details.filter.spec.ts` (mapea un `HealthCheckResult` de error a 503 con el
+  detalle) + 1 e2e nuevo (`tests/health.e2e-spec.ts`, Testcontainers, camino feliz). Verificación
+  manual además de los tests automatizados: con la app corriendo de verdad contra el Postgres de
+  Docker, `GET /api/health` devolvió `200` con `status: 'up'`; deteniendo el contenedor
+  (`docker stop`) con la app corriendo, el mismo endpoint devolvió `503` con
+  `errors: ["database: ..."]` describiendo la falla real de conexión; al reiniciar el contenedor
+  (`docker start`), sin reiniciar la app, volvió a `200` solo — confirmando que no hay estado
+  cacheado entre chequeos.
+- **Corregido**: el primer test unitario fallaba porque el mock de `PrismaService` solo tenía
+  `$queryRawUnsafe` — `PrismaHealthIndicator.pingDb` prueba primero `$runCommandRaw` (su ping para
+  Mongo) y solo cae a `$queryRawUnsafe` (el ping SQL) cuando ese primer intento lanza el error
+  específico que un `PrismaClient` real sobre Postgres tira para ese método
+  (`"Use the mongodb provider"`); el mock necesitaba simular también ese primer fallo para llegar
+  al camino SQL, igual que lo hace un cliente real.
+- **Decisión propia**: documentada como decisión #27 en `ARCHITECTURE.md`. Un solo indicador
+  (Postgres, vía Prisma) — no se agrega uno aparte para pg-boss porque corre sobre la misma
+  conexión, así que sería redundante. Se agregó también un ítem nuevo en `ARCHITECTURE.md` §8:
+  separar *liveness* de *readiness* (y eventualmente sumar un ping al LLM) queda para producción,
+  no para este desafío, que pide un único `GET /api/health`.
+- **Pendiente de revisar**: el reintento "con corrección" del LLM ante `LLM_INVALID_RESPONSE`
+  sigue como el último de los 3 puntos prioritarios acordados con el autor.

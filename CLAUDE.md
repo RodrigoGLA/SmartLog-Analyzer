@@ -140,7 +140,9 @@ Cada etapa termina con tests en verde y uno o más commits.
         intervalo todavía (decisión #20 en `ARCHITECTURE.md`).
       - Filtros en `GET /api/logs` (`service`, `level`, `from`, `to`, `search`) — **hecho**
         (decisión #26 en `ARCHITECTURE.md`).
-      - Health check con terminus — pendiente.
+      - `GET /api/health` con `@nestjs/terminus` (`PrismaHealthIndicator`, chequea Postgres) —
+        **hecho** (decisión #27 en `ARCHITECTURE.md`). `200` si la base responde, `503` con el
+        detalle de qué falló si no.
       - `interval` (hora/día) en `/api/logs/stats` — pendiente, opcional si da el tiempo.
       - Swagger/OpenAPI (`@nestjs/swagger`, servido en `/docs`) — **hecho**, adelantado desde la
         Etapa 6 para tener documentación interactiva mientras se suman endpoints (decisión #22).
