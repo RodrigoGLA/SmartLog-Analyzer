@@ -427,3 +427,30 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
 - **Decisión propia**: documentada como decisión #28 en `ARCHITECTURE.md`.
 - **Pendiente de revisar**: ninguno de los 3 puntos prioritarios queda pendiente. Sigue para
   después (Etapa 6, sin apuro): README, Dockerfile de la app, `docker-compose.yml` final.
+
+### 2026-11-04 — Documentar en Swagger el shape de error de cada endpoint
+- **Pedido**: probando `GET /api/health` a mano (parando el container de Postgres), el autor notó
+  que Swagger documentaba el 200 pero no decía nada del 503 real — y preguntó si eso estaba bien
+  documentado. Se le explicó que el código era correcto (el 503 real pasa por `ProblemDetailsFilter`,
+  no por el shape nativo de terminus — decisión #27) pero que Swagger nunca reflejaba ese shape de
+  error, ni en `/health` ni en ningún otro endpoint del proyecto (ninguno tenía `@ApiResponse` para
+  sus errores). El autor pidió agregarlo.
+- **Aporte**: `ProblemDetailsDto` nuevo (`src/common/dto/problem-details.dto.ts`), con el mismo
+  shape que ya arma `ProblemDetailsFilter`. Se agregó `@ApiResponse({status, type: ProblemDetailsDto})`
+  por cada error real que puede devolver cada controller: 400 en `POST/GET /api/logs`,
+  `GET /api/logs/stats` y `POST /api/logs/analyze` (validación o `from`/`to` invertido); 422 en
+  `POST /api/logs/analyze` (rango demasiado grande, o sin logs); 400/404 en `GET /api/analysis/:id`
+  (uuid inválido / no existe); 503 en `GET /api/health`.
+- **Corregido**: en `/api/health`, agregar `@ApiResponse(503, ...)` junto al `@HealthCheck()` de
+  terminus no alcanzaba — `@HealthCheck()` ya agrega su propia documentación Swagger para 200/503
+  (con el shape nativo `status`/`info`/`error`/`details`), y Nest mergea ambos `@ApiResponse` del
+  mismo status en vez de reemplazar uno por el otro, dejando un schema inconsistente (ambos
+  superpuestos). Se verificó esto leyendo `node_modules/@nestjs/terminus/dist/health-check/health-check.decorator.js`
+  y comparando `GET /docs-json` antes/después. Se resolvió con `@HealthCheck({ swaggerDocumentation: false })`
+  para apagar esa documentación automática y describir las dos respuestas (200 y 503) a mano.
+  Verificado levantando la app en un puerto aparte (sin tocar el proceso que el autor tenía
+  corriendo) y confirmando en `/docs` que el 503 de `/api/health` y los 400/404/422 del resto ya
+  muestran `ProblemDetailsDto`.
+- **Decisión propia**: documentada como decisión #29 en `ARCHITECTURE.md`.
+- **Pendiente de revisar**: ninguno. Sigue para después (Etapa 6, sin apuro): README ya en
+  `develop`; falta Dockerfile de la app y `docker-compose.yml` final.
