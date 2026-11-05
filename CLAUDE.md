@@ -184,6 +184,7 @@ Cada etapa termina con tests en verde y uno o más commits.
 - [ ] **6. Cierre**: README completo (levantar, testear, uso de IA, pendientes), Dockerfile
       multi-stage de la app + `docker-compose.yml` final (app + db), revisión de ARCHITECTURE.md,
       verificación final (`docker compose up` desde cero, sin secretos en git).
-- [ ] **Extras (si hay tiempo)**: ~~CI con GitHub Actions~~ (hecho: lint + unit tests en
-      `.github/workflows/ci.yml`, push/PR a `develop`/`main`; e2e queda afuera por ahora, se evalúa
-      si se suma después), Makefile, logging estructurado (pino), ingesta por lotes.
+- [ ] **Extras (si hay tiempo)**: ~~CI con GitHub Actions~~ (hecho: `.github/workflows/ci.yml`,
+      push/PR a `develop`/`main` — job `lint-and-test` + job `e2e` con Testcontainers, encadenado
+      con `needs` para no gastar tiempo de CI si lo básico ya falla), Makefile, logging
+      estructurado (pino), ingesta por lotes.

@@ -24,3 +24,23 @@ jobs:
       - run: npm run db:generate
       - run: npm run lint
       - run: npm test
+
+  e2e:
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    env:
+      # Mismo motivo que en el job anterior: solo para que prisma.config.ts cargue.
+      # Las specs *.e2e-spec.ts usan su propio Postgres real, vía Testcontainers
+      # (tests/setup/postgres-test-container.ts), no esta variable.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run test:e2e
