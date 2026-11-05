@@ -14,7 +14,8 @@ es solo la puerta de entrada: qué hace y cómo correrlo.
 - **`GET /api/logs`** — lista logs paginados, con filtros (`service`, `level`, `from`, `to`,
   `search`).
 - **`GET /api/logs/stats`** — agrega logs por servicio o por nivel (consulta de agregación).
-- **`POST /api/logs/analyze`** — encola un análisis de IA sobre un rango de logs (202, asíncrono).
+- **`POST /api/logs/analyze`** — encola un análisis de IA sobre un rango de logs (202, asíncrono;
+  real con Gemini o determinístico con el mock por default — ver nota en "Cómo correrlo").
 - **`GET /api/analysis/:id`** — consulta el resultado (`pending` → `processing` →
   `completed`/`failed`, con `summary`, `findings` y `suggestions`, o el error).
 - **`GET /api/health`** — estado del servicio y su conexión a la base.
@@ -62,11 +63,18 @@ El container de la app corre solo, al arrancar, las migraciones (`prisma migrate
 de ejemplo (12 servicios, ~4800 logs) — queda listo para probar sin ningún paso manual extra. El
 seed es idempotente: se puede reiniciar el container las veces que haga falta sin duplicar datos.
 
-Por defecto `LLM_PROVIDER=mock` en `.env.example`, así que no hace falta ninguna key para probar el
-flujo completo. Para usar el proveedor real, generar una key gratuita en
-[aistudio.google.com/apikey](https://aistudio.google.com/apikey) y completar `LLM_PROVIDER=gemini`
-+ `LLM_API_KEY` en `.env`. El resto de las variables (timeouts, límites de paginación/patrones,
-reintentos) están documentadas con sus defaults en `.env.example`.
+> **Importante — mock vs. análisis real**: por defecto `LLM_PROVIDER=mock` en `.env.example`, así
+> que no hace falta ninguna key para probar **todo el sistema** (ingesta, filtros, stats, el flujo
+> asíncrono completo de `/analyze` con sus reintentos, etc.). Pero el `summary`/`findings`/
+> `suggestions` que te va a devolver en ese modo **no los genera una IA real**: `MockLlmProvider`
+> (`src/llm/mock-llm-provider.ts`) arma ese texto con una plantilla fija a partir de los datos
+> reales (cuántos patrones hay, cuál es el más frecuente, en qué servicio) — es determinístico, sin
+> llamar a ningún LLM. Para ver el análisis generado de verdad por Gemini, generar una key gratuita
+> en [aistudio.google.com/apikey](https://aistudio.google.com/apikey) y completar
+> `LLM_PROVIDER=gemini` + `LLM_API_KEY` en `.env`.
+
+El resto de las variables (timeouts, límites de paginación/patrones, reintentos) están
+documentadas con sus defaults en `.env.example`.
 
 ## Cómo testear
 
@@ -79,8 +87,11 @@ npm run lint       # oxlint, type-aware
 ## Uso de IA
 
 - **En la app**: el análisis usa un LLM (Gemini, o un mock con escenarios para tests) detrás de una
-  interfaz (`LlmProvider`) intercambiable por variable de entorno. La salida se valida con Zod antes
-  de persistirse; ver ARCHITECTURE.md §4 y las decisiones #4, #5, #25 y #28.
+  interfaz (`LlmProvider`) intercambiable por variable de entorno. **Con el mock (default) el
+  análisis no es generado por IA** — es una plantilla determinística armada a partir de los datos
+  reales, útil para probar todo el flujo sin key ni costo (ver nota en "Cómo correrlo" para activar
+  Gemini real). La salida se valida con Zod antes de persistirse; ver ARCHITECTURE.md §4 y las
+  decisiones #4, #5, #25 y #28.
 - **En el desarrollo**: este proyecto se construyó con asistencia de Claude Code. El detalle de cada
   sesión (qué se pidió, qué se corrigió, qué decisiones se tomaron sin consultar) está en
   **[docs/ai-usage.md](docs/ai-usage.md)**.
