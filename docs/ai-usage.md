@@ -454,3 +454,35 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
 - **Decisión propia**: documentada como decisión #29 en `ARCHITECTURE.md`.
 - **Pendiente de revisar**: ninguno. Sigue para después (Etapa 6, sin apuro): README ya en
   `develop`; falta Dockerfile de la app y `docker-compose.yml` final.
+
+### 2026-11-04 — Verificación en vivo de cada endpoint y auditoría final de schemas
+- **Pedido**: el autor fue probando cada endpoint a mano contra el server real (`POST/GET /api/logs`,
+  `GET /api/logs/stats`, `POST /api/logs/analyze`, `GET /api/analysis/:id`), pidiendo en cada paso
+  verificar (no asumir) que el 200/400/404/422 documentado en Swagger coincidiera con la respuesta
+  real, y preguntando conceptos sobre la marcha (`traceId`, unicidad de `timestamp`, diseño de
+  `/logs` sin parámetros obligatorios, diferencia `/logs` vs `/logs/stats`). Incluyó un `POST
+  /api/logs/analyze` real contra Gemini (con su API key real, no mockeada — autorizado explícitamente
+  por el autor tras advertirle del costo), que resultó en un 503 real de Gemini (`UNAVAILABLE`,
+  "modelo con alta demanda"), dando pie a verificar cómo maneja eso la cola. Al cerrar, pidió una
+  última pasada sobre todos los schemas de response para encontrar y corregir lo que faltara.
+- **Aporte**: todas las verificaciones se hicieron con requests reales contra el server del autor
+  (puerto 3000) para los casos sin efecto en la cola/LLM (400/404/422, que lanzan antes de encolar),
+  y con una instancia descartable en un puerto aparte (3001, Postgres compartido) solo para leer
+  `/docs-json` sin reiniciar el proceso del autor. Se explicó la diferencia entre el 503
+  `UNAVAILABLE` de Gemini (sobrecarga del lado de Google, no consume cuota) y un 429
+  `RESOURCE_EXHAUSTED` (sí sería cuota) — el que apareció fue el primero. Se confirmó leyendo
+  `analysis-worker.service.ts` que ese 503 (como cualquier `LlmProviderError`) no se reintenta solo:
+  es un error de dominio (decisión #24), el worker lo persiste como `Analysis.status = failed` y
+  resuelve sin relanzar, así que pg-boss nunca lo ve como una falla a reintentar. En la auditoría
+  final de schemas se encontró que `POST /api/logs` (201), `GET /api/logs` (200) y `GET
+  /api/logs/stats` (200) nunca habían tenido su `@ApiResponse` de éxito — mismo hueco que la
+  decisión #29, pero del lado feliz en vez del de error. Se corrigieron los 3 con el shape real de
+  `logs.service.ts` (`LogResponse`/`PaginatedLogs`/`StatsResponse`), verificado otra vez contra
+  `/docs-json` en una instancia descartable.
+- **Corregido**: nada del comportamiento real — todo lo encontrado fue documentación de Swagger
+  desactualizada o incompleta (200/201 de `/logs*`), nunca una respuesta real distinta de lo
+  esperado.
+- **Decisión propia**: actualización de la decisión #29 en `ARCHITECTURE.md` (se amplía para
+  cubrir también el camino feliz, no solo los errores).
+- **Pendiente de revisar**: ninguno. Sigue para después (Etapa 6): README ya en `develop`; falta
+  Dockerfile de la app y `docker-compose.yml` final.

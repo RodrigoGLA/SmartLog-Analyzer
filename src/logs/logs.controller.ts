@@ -15,6 +15,22 @@ export class LogsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Ingestar un log, registrando el servicio si no existe' })
+  @ApiResponse({
+    status: 201,
+    description: 'Log creado',
+    schema: {
+      example: {
+        id: '42',
+        service: 'checkout-api',
+        level: 'ERROR',
+        message: 'Connection to database timed out',
+        timestamp: '2026-11-03T18:12:00.000Z',
+        ingestedAt: '2026-11-04T10:00:00.000Z',
+        traceId: 'req-abc123',
+        metadata: { region: 'us-east-1' },
+      },
+    },
+  })
   @ApiResponse({ status: 400, description: 'Body inválido', type: ProblemDetailsDto })
   create(@Body() dto: CreateLogDto): Promise<LogResponse> {
     return this.logsService.create(dto);
@@ -30,6 +46,27 @@ export class LogsController {
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Default: 1' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Default: 20, máx. 100' })
   @ApiResponse({
+    status: 200,
+    description: 'Página de logs que matchean los filtros',
+    schema: {
+      example: {
+        data: [
+          {
+            id: '42',
+            service: 'checkout-api',
+            level: 'ERROR',
+            message: 'Connection to database timed out',
+            timestamp: '2026-11-03T18:12:00.000Z',
+            ingestedAt: '2026-11-04T10:00:00.000Z',
+            traceId: 'req-abc123',
+            metadata: { region: 'us-east-1' },
+          },
+        ],
+        meta: { page: 1, limit: 20, total: 137 },
+      },
+    },
+  })
+  @ApiResponse({
     status: 400,
     description: 'Query inválida, o `from` posterior a `to`',
     type: ProblemDetailsDto,
@@ -43,6 +80,21 @@ export class LogsController {
   @ApiQuery({ name: 'groupBy', required: true, enum: STATS_GROUP_BY_VALUES })
   @ApiQuery({ name: 'from', required: false, type: String, description: 'ISO 8601' })
   @ApiQuery({ name: 'to', required: false, type: String, description: 'ISO 8601' })
+  @ApiResponse({
+    status: 200,
+    description: 'Conteo agregado por `groupBy`, ordenado de mayor a menor',
+    schema: {
+      example: {
+        groupBy: 'service',
+        from: '2026-10-28T00:00:00.000Z',
+        to: '2026-11-02T00:00:00.000Z',
+        data: [
+          { key: 'aws-ecs-payments-api', count: 58 },
+          { key: 'checkout-api', count: 23 },
+        ],
+      },
+    },
+  })
   @ApiResponse({
     status: 400,
     description: 'Query inválida, o `from` posterior a `to`',
