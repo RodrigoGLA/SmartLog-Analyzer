@@ -35,9 +35,11 @@ salida del LLM, Google Gemini como proveedor real (con un mock para desarrollo/t
 Requisitos: Node 26.x (ver `engines` en `package.json`) y Docker (para Postgres, y para los tests
 e2e, que levantan un Postgres efímero con Testcontainers).
 
+**Desarrollo local** (recompila al vuelo, recomendado mientras se itera):
+
 ```bash
 cp .env.example .env
-docker compose up -d
+docker compose up -d db
 npm install
 npm run db:migrate:dev
 npm run start:dev
@@ -46,6 +48,16 @@ npm run start:dev
 `db:migrate:dev` aplica las migraciones y corre el seed de ejemplo automáticamente (12 servicios,
 ~4800 logs — decisión #19). La app queda en `http://localhost:3000`, con Swagger interactivo en
 `http://localhost:3000/docs`.
+
+**Todo en Docker** (app + base, sin instalar nada local):
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+El container de la app corre las migraciones solo al arrancar (`prisma migrate deploy`), pero no
+siembra datos de ejemplo — para eso, con todo arriba: `docker compose exec app npm run db:seed`.
 
 Por defecto `LLM_PROVIDER=mock` en `.env.example`, así que no hace falta ninguna key para probar el
 flujo completo. Para usar el proveedor real, generar una key gratuita en
@@ -72,7 +84,6 @@ npm run lint       # oxlint, type-aware
 
 ## Qué queda afuera
 
-Hoy solo Postgres corre en Docker; la app corre local (decisión #16) — falta el `Dockerfile`
-multi-stage de la app y un `docker-compose.yml` que levante todo junto. El checklist completo de
-etapas, con lo que está hecho y lo que falta, está en **[CLAUDE.md](CLAUDE.md)**; las limitaciones
-conocidas y qué cambiaría en producción están en **ARCHITECTURE.md §8**.
+El checklist completo de etapas, con lo que está hecho y lo que falta, está en
+**[CLAUDE.md](CLAUDE.md)**; las limitaciones conocidas y qué cambiaría en producción están en
+**ARCHITECTURE.md §8**.

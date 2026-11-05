@@ -505,3 +505,28 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
   foco en la aplicación propia. Documentado el análisis completo en `ARCHITECTURE.md` §8.
 - **Pendiente de revisar**: ninguno nuevo. Sigue para después (Etapa 6): README ya en `develop`;
   falta Dockerfile de la app y `docker-compose.yml` final.
+
+### 2026-11-04 — Etapa 6: Dockerfile, docker-compose final y cierre
+- **Pedido**: cerrar el proyecto — Dockerfile multi-stage de la app, `docker-compose.yml` que
+  levante app+db juntos, actualizar README/ARCHITECTURE.md, y tildar el checklist de `CLAUDE.md`.
+- **Aporte**: antes de escribir el Dockerfile se inspeccionó `node_modules/.prisma/client` (no se
+  asumió nada) y se encontró que Prisma 7 con el adapter de driver genera un compilador de queries
+  en WASM, no un binario nativo — esto elimina el clásico problema de `binaryTargets` entre Alpine
+  (musl) y glibc en Docker, simplificando el diseño. Se armó un Dockerfile de 2 etapas
+  (`node:26-alpine` ambas), reclasificando `prisma` y `dotenv` de `devDependencies` a
+  `dependencies` (necesarios en runtime para `prisma migrate deploy`), con migraciones automáticas
+  al arrancar el container. Se agregó el servicio `app` a `docker-compose.yml` (con `DATABASE_URL`
+  apuntando a `db` dentro de la red de Compose, distinto del `localhost` que usa `.env` para
+  desarrollo local) y un `.dockerignore` nuevo. Se actualizaron README (flujo "todo en Docker" +
+  limpieza de "Qué queda afuera", ya resuelto) y `ARCHITECTURE.md` (decisión #30, más un puntero
+  agregado a la #16). Se verificó de punta a punta con `docker compose down -v` +
+  `docker compose up --build` desde cero (ver detalle de la verificación real en el commit).
+- **Corregido**: ninguno grave — el diseño salió bien al primer intento gracias a verificar el
+  hallazgo del WASM antes de escribir el Dockerfile, en vez de copiar una receta genérica de
+  Prisma+Docker que hubiera asumido binarios nativos.
+- **Decisión propia**: decisión #30 en `ARCHITECTURE.md`. De paso se tildaron las Etapas 1 y 2 del
+  checklist de `CLAUDE.md`, que ya estaban completas en sus sub-ítems pero habían quedado sin
+  marcar de versiones anteriores.
+- **Pendiente de revisar**: ninguno. Quedan solo los extras opcionales "si hay tiempo" listados en
+  `CLAUDE.md` (bucketing por intervalo en `/logs/stats`, Makefile, logging estructurado, ingesta
+  por lotes) — ninguno bloquea la entrega.
