@@ -13,6 +13,13 @@ export class AnalyzeController {
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({ summary: 'Encolar un análisis asíncrono de logs en un rango de fechas' })
   @ApiResponse({
+    status: 202,
+    description: 'Análisis encolado; procesa un worker en background',
+    schema: {
+      example: { id: '550e8400-e29b-41d4-a716-446655440000', status: 'pending' },
+    },
+  })
+  @ApiResponse({
     status: 400,
     description: 'Body inválido, o `from` posterior a `to`',
     type: ProblemDetailsDto,
