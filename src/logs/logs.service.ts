@@ -67,17 +67,32 @@ export class LogsService {
   }
 
   async findAll(query: ListLogsQueryDto): Promise<PaginatedLogs> {
-    const { page, limit } = query;
-    const skip = (page - 1) * limit;
+    const { page, limit, service, level, search } = query;
+    const from = query.from ? new Date(query.from) : undefined;
+    const to = query.to ? new Date(query.to) : undefined;
+    if (from && to && from > to) {
+      throw new BadRequestException('`from` must be earlier than or equal to `to`');
+    }
 
+    const where: Prisma.LogWhereInput = {
+      ...(service && { service: { name: { equals: service, mode: 'insensitive' } } }),
+      ...(level && { level }),
+      ...(search && { message: { contains: search, mode: 'insensitive' } }),
+    };
+    if (from || to) {
+      where.timestamp = { ...(from && { gte: from }), ...(to && { lte: to }) };
+    }
+
+    const skip = (page - 1) * limit;
     const [logs, total] = await this.prisma.$transaction([
       this.prisma.log.findMany({
+        where,
         skip,
         take: limit,
         orderBy: { timestamp: 'desc' },
         include: { service: true },
       }),
-      this.prisma.log.count(),
+      this.prisma.log.count({ where }),
     ]);
 
     return {

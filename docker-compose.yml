@@ -12,5 +12,18 @@ services:
       timeout: 5s
       retries: 10
 
+  app:
+    build: .
+    env_file: .env
+    environment:
+      # Dentro de la red de Docker la base se resuelve por nombre de servicio (`db`), no
+      # `localhost` como en .env (pensado para correr la app local — decisiones #16/#31).
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    ports:
+      - '${PORT:-3000}:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   pgdata:

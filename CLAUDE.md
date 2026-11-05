@@ -120,7 +120,7 @@ Cada etapa termina con tests en verde y uno o más commits.
 
 - [x] **0. Setup**: `nest new`, TypeScript strict, oxlint/Prettier, `.gitignore`, `.nvmrc`,
       `git init`, primer commit.
-- [ ] **1. Infraestructura mínima + CRUD de logs** (fusiona las etapas 1/2/3/4 originales):
+- [x] **1. Infraestructura mínima + CRUD de logs** (fusiona las etapas 1/2/3/4 originales):
       - Postgres en Docker (`docker-compose.yml`, healthcheck) — la app sigue corriendo local.
       - Prisma: schema completo (ver ARCHITECTURE §5), migración inicial.
       - `ConfigModule` con validación fail-fast de las env vars que ya se usan (`PORT`,
@@ -132,14 +132,15 @@ Cada etapa termina con tests en verde y uno o más commits.
         servicios simulando AWS/Azure/GCP/on-prem, ~4800 logs con metadata realista por proveedor
         y ráfagas de error, idempotente (`npm run db:seed`). Adelantado desde la Etapa 2 porque el
         enunciado lo pide explícitamente ("scripts de migración y seed con datos de ejemplo").
-      - **Diferido dentro de esta etapa** (se suman cuando se retome el resto de logs): filtros
-        avanzados y `GET /api/logs/stats`, health check con terminus, Dockerfile de la app.
-- [ ] **2. Logs — resto**:
+- [x] **2. Logs — resto**:
       - `GET /api/logs/stats?groupBy=service|level&from=&to=` (consulta de agregación — requisito
         explícito del enunciado) — **hecho**. Un solo `groupBy` por request, sin bucketing por
         intervalo todavía (decisión #20 en `ARCHITECTURE.md`).
-      - Filtros en `GET /api/logs` (`service`, `level`, `from`, `to`, `search`) — pendiente.
-      - Health check con terminus — pendiente.
+      - Filtros en `GET /api/logs` (`service`, `level`, `from`, `to`, `search`) — **hecho**
+        (decisión #26 en `ARCHITECTURE.md`).
+      - `GET /api/health` con `@nestjs/terminus` (`PrismaHealthIndicator`, chequea Postgres) —
+        **hecho** (decisión #27 en `ARCHITECTURE.md`). `200` si la base responde, `503` con el
+        detalle de qué falló si no.
       - `interval` (hora/día) en `/api/logs/stats` — pendiente, opcional si da el tiempo.
       - Swagger/OpenAPI (`@nestjs/swagger`, servido en `/docs`) — **hecho**, adelantado desde la
         Etapa 6 para tener documentación interactiva mientras se suman endpoints (decisión #22).
@@ -168,10 +169,23 @@ Cada etapa termina con tests en verde y uno o más commits.
       `AnalysisWorkerService` → Gemini → `GET /api/analysis/:id` con `completed` y findings reales.
       Idea anotada (fuera de git, `.claude/notes/analysis-worker-flow.md`): reintento "con
       corrección" ante `LLM_INVALID_RESPONSE`, reenviando el prompt 1-2 veces con el error de Zod
-      antes de rendirse — evaluada y **diferida** a pedido del autor, no implementada en esta
-      vuelta.
-- [ ] **6. Cierre**: README completo (levantar, testear, uso de IA, pendientes), Dockerfile
-      multi-stage de la app + `docker-compose.yml` final (app + db), revisión de ARCHITECTURE.md,
-      verificación final (`docker compose up` desde cero, sin secretos en git).
-- [ ] **Extras (si hay tiempo)**: CI con GitHub Actions, Makefile, logging estructurado (pino),
-      ingesta por lotes.
+      antes de rendirse — evaluada y diferida en su momento a pedido del autor; **implementada**
+      después (decisión #28), ver Etapa 2.5 más abajo.
+- [x] **2.5. Reintento "con corrección" ante `LLM_INVALID_RESPONSE`**: `AnalysisWorkerService`
+      reintenta hasta `LLM_MAX_CORRECTION_RETRIES` veces (nueva env var, default 1, tope 2) cuando
+      la respuesta del LLM no cumple `analysisResultSchema` o ni siquiera es JSON válido,
+      reenviando el error de validación al provider. Solo este error reintenta — timeout y fallas
+      del proveedor siguen terminales de inmediato, sin cambios (decisión #28, reafirma #24/#25).
+      `GeminiLlmProvider` lo arma como un turno de chat real (`user`→`model` con la respuesta
+      anterior→`user` con la corrección). `pg-boss.expireInSeconds` pasó de ser una constante fija
+      a calcularse a partir de `LLM_TIMEOUT_MS` y el tope de reintentos.
+- [x] **6. Cierre**: README completo (levantar, testear, uso de IA, pendientes) — **hecho**.
+      Dockerfile multi-stage de la app + `docker-compose.yml` final (app + db) — **hecho**
+      (decisión #30). Revisión de ARCHITECTURE.md — **hecho**. Verificación final: `docker compose
+      up --build` desde cero (stack aislado, sin tocar el entorno de desarrollo real) — migración
+      automática, `/api/health` en 200, Swagger sirviendo, `POST`/`GET /api/logs` reales, sin
+      `.env` ni dependencias de dev filtradas en la imagen final.
+- [ ] **Extras (si hay tiempo)**: ~~CI con GitHub Actions~~ (hecho: `.github/workflows/ci.yml`,
+      push/PR a `develop`/`main` — job `lint-and-test` + job `e2e` con Testcontainers, encadenado
+      con `needs` para no gastar tiempo de CI si lo básico ya falla), Makefile, logging
+      estructurado (pino), ingesta por lotes.

@@ -20,6 +20,7 @@ async function bootstrap() {
     .setDescription('Ingesta, consulta y análisis con IA de logs de microservicios.')
     .setVersion('0.0.1')
     .addTag('logs', 'Ingesta, listado y agregación de logs')
+    .addTag('health', 'Estado del servicio y sus dependencias')
     .build();
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, swaggerDocument);

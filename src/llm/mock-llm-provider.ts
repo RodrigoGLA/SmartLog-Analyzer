@@ -1,4 +1,4 @@
-import type { LlmAnalysisInput, LlmProvider } from './llm-provider.interface.js';
+import type { LlmAnalysisInput, LlmCorrectionContext, LlmProvider } from './llm-provider.interface.js';
 
 export type MockLlmScenario = 'success' | 'invalid-format' | 'timeout';
 
@@ -9,7 +9,8 @@ export class MockLlmProvider implements LlmProvider {
 
   constructor(private readonly scenario: MockLlmScenario = 'success') {}
 
-  analyze(input: LlmAnalysisInput): Promise<unknown> {
+  // `correction` no se usa: el mock simula por escenario fijo, no por estado de conversación.
+  analyze(input: LlmAnalysisInput, _correction?: LlmCorrectionContext): Promise<unknown> {
     switch (this.scenario) {
       case 'success':
         return Promise.resolve(this.buildSuccessResult(input));

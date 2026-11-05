@@ -51,6 +51,13 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         return { status, title: exception.message, detail: body };
       }
 
+      if (this.isHealthCheckResult(body)) {
+        const failed = Object.entries(body.error ?? {}).map(
+          ([key, value]) => `${key}: ${(value as { message?: string }).message ?? 'down'}`,
+        );
+        return { status, title: 'Service Unavailable', errors: failed.length > 0 ? failed : undefined };
+      }
+
       const { message, error } = body as { message?: string | string[]; error?: string };
       const errors = Array.isArray(message) ? message : undefined;
       const detail = !errors && typeof message === 'string' ? message : undefined;
@@ -62,5 +69,10 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       status: HttpStatus.INTERNAL_SERVER_ERROR,
       title: 'Internal Server Error',
     };
+  }
+
+  /** Reconoce el `HealthCheckResult` que lanza `@nestjs/terminus` como `ServiceUnavailableException`. */
+  private isHealthCheckResult(body: unknown): body is { error?: Record<string, unknown> } {
+    return typeof body === 'object' && body !== null && 'status' in body && 'details' in body;
   }
 }

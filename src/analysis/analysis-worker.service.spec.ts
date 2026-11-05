@@ -1,6 +1,7 @@
 import { AnalysisStatus } from '@prisma/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
+import { LlmInvalidResponseError } from '../llm/llm.errors.js';
 import { LogPreprocessor } from '../llm/log-preprocessor.js';
 import type { LlmProvider } from '../llm/llm-provider.interface.js';
 import type { LogsService } from '../logs/logs.service.js';
@@ -32,7 +33,11 @@ function createDeps() {
   const preprocessor = new LogPreprocessor();
 
   const config = {
-    get: vi.fn((key: string) => (key === 'LLM_TIMEOUT_MS' ? 1000 : 50)),
+    get: vi.fn((key: string) => {
+      if (key === 'LLM_TIMEOUT_MS') return 1000;
+      if (key === 'LLM_MAX_CORRECTION_RETRIES') return 1;
+      return 50;
+    }),
   } as unknown as ConfigService & { get: ReturnType<typeof vi.fn> };
 
   return { pgBoss, prisma, logsService, llmProvider, preprocessor, config };
@@ -111,6 +116,74 @@ describe('AnalysisWorkerService.handleJob', () => {
       expect.objectContaining({
         data: expect.objectContaining({ status: AnalysisStatus.failed, errorCode: 'LLM_INVALID_RESPONSE' }),
       }),
+    );
+  });
+
+  it('retries once with a correction after an invalid response, and completes on the second try', async () => {
+    deps.prisma.analysis.findUniqueOrThrow.mockResolvedValue(pendingAnalysis());
+    const invalidResponse = { summary: 42, findings: 'nope' };
+    deps.llmProvider.analyze
+      .mockResolvedValueOnce(invalidResponse)
+      .mockResolvedValueOnce({ summary: 'ok', findings: [], suggestions: [] });
+
+    await worker.handleJob('abc-123');
+
+    expect(deps.llmProvider.analyze).toHaveBeenCalledTimes(2);
+    const [, correction] = deps.llmProvider.analyze.mock.calls[1];
+    expect(correction.previousResponse).toEqual(invalidResponse);
+    expect(correction.validationError).toBeTruthy();
+    expect(deps.prisma.analysis.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: AnalysisStatus.completed }) }),
+    );
+  });
+
+  it('gives up after exhausting correction retries and persists LLM_INVALID_RESPONSE', async () => {
+    deps.prisma.analysis.findUniqueOrThrow.mockResolvedValue(pendingAnalysis());
+    deps.llmProvider.analyze.mockResolvedValue({ summary: 42, findings: 'nope' });
+
+    await worker.handleJob('abc-123');
+
+    expect(deps.llmProvider.analyze).toHaveBeenCalledTimes(2); // 1 intento original + 1 reintento (default)
+    expect(deps.prisma.analysis.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: AnalysisStatus.failed, errorCode: 'LLM_INVALID_RESPONSE' }),
+      }),
+    );
+  });
+
+  it('does not retry when LLM_MAX_CORRECTION_RETRIES is 0', async () => {
+    deps.config.get.mockImplementation((key: string) => {
+      if (key === 'LLM_TIMEOUT_MS') return 1000;
+      if (key === 'LLM_MAX_CORRECTION_RETRIES') return 0;
+      return 50;
+    });
+    deps.prisma.analysis.findUniqueOrThrow.mockResolvedValue(pendingAnalysis());
+    deps.llmProvider.analyze.mockResolvedValue({ summary: 42, findings: 'nope' });
+
+    await worker.handleJob('abc-123');
+
+    expect(deps.llmProvider.analyze).toHaveBeenCalledTimes(1);
+    expect(deps.prisma.analysis.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: AnalysisStatus.failed, errorCode: 'LLM_INVALID_RESPONSE' }),
+      }),
+    );
+  });
+
+  it('also retries when the provider itself throws LlmInvalidResponseError (e.g. malformed JSON text)', async () => {
+    deps.prisma.analysis.findUniqueOrThrow.mockResolvedValue(pendingAnalysis());
+    deps.llmProvider.analyze
+      .mockRejectedValueOnce(new LlmInvalidResponseError('Gemini returned malformed JSON: unexpected token'))
+      .mockResolvedValueOnce({ summary: 'ok', findings: [], suggestions: [] });
+
+    await worker.handleJob('abc-123');
+
+    expect(deps.llmProvider.analyze).toHaveBeenCalledTimes(2);
+    const [, correction] = deps.llmProvider.analyze.mock.calls[1];
+    expect(correction.previousResponse).toBeUndefined();
+    expect(correction.validationError).toContain('malformed JSON');
+    expect(deps.prisma.analysis.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: AnalysisStatus.completed }) }),
     );
   });
 

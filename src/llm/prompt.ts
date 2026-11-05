@@ -1,4 +1,4 @@
-import type { LlmAnalysisInput } from './llm-provider.interface.js';
+import type { LlmAnalysisInput, LlmCorrectionContext } from './llm-provider.interface.js';
 
 export const SYSTEM_PROMPT = `Eres un ingeniero de SRE que analiza logs de microservicios agrupados en patrones (no logs
 crudos: cada patrón ya representa N ocurrencias del mismo tipo de evento, con placeholders como
@@ -37,4 +37,14 @@ export function buildPrompt(input: LlmAnalysisInput): string {
     .join('\n');
 
   return `${header}\n\n${patterns}`;
+}
+
+export function buildCorrectionPrompt(correction: LlmCorrectionContext): string {
+  return [
+    'Tu respuesta anterior no cumplió el contrato JSON pedido y fue rechazada por este motivo:',
+    correction.validationError,
+    '',
+    'Corregí tu respuesta y respondé de nuevo ÚNICAMENTE con el JSON corregido, cumpliendo',
+    'exactamente el mismo contrato indicado antes (sin explicaciones ni texto adicional).',
+  ].join('\n');
 }

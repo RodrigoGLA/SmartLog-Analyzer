@@ -47,4 +47,11 @@ export class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   LLM_MODEL: string = 'gemini-3.5-flash-lite';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(2)
+  LLM_MAX_CORRECTION_RETRIES: number = 1;
 }

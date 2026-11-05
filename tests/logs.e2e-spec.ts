@@ -25,7 +25,12 @@ describe('Logs (e2e)', () => {
     // Testcontainers (sin pisar `PgBossService` también, este test conectaba en silencio a la
     // Postgres real de dev en el puerto 5432, tal como `PrismaService` antes de la decisión #21).
     const testConfig = {
-      get: () => container.getConnectionUri(),
+      get: (key: string) => {
+        if (key === 'DATABASE_URL') return container.getConnectionUri();
+        if (key === 'LLM_TIMEOUT_MS') return 20000;
+        if (key === 'LLM_MAX_CORRECTION_RETRIES') return 1;
+        return undefined;
+      },
     } as unknown as ConfigService<EnvironmentVariables, true>;
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
@@ -93,6 +98,31 @@ describe('Logs (e2e)', () => {
     const response = await request(app.getHttpServer())
       .get('/api/logs/stats')
       .query({ groupBy: 'level', from: '2026-02-01', to: '2026-01-01' })
+      .expect(400);
+
+    expect(response.headers['content-type']).toContain('application/problem+json');
+  });
+
+  it('filters /api/logs by service and level together', async () => {
+    await request(app.getHttpServer())
+      .post('/api/logs')
+      .send({ service: 'payments-api', level: 'WARN', message: 'slow response' })
+      .expect(201);
+
+    const response = await request(app.getHttpServer())
+      .get('/api/logs')
+      .query({ service: 'PAYMENTS-API', level: 'WARN' })
+      .expect(200);
+
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0].service).toBe('payments-api');
+    expect(response.body.data[0].message).toBe('slow response');
+  });
+
+  it('rejects /api/logs when from is after to', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/logs')
+      .query({ from: '2026-02-01', to: '2026-01-01' })
       .expect(400);
 
     expect(response.headers['content-type']).toContain('application/problem+json');

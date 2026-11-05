@@ -1,6 +1,6 @@
 import { LlmInvalidResponseError, LlmProviderError, LlmTimeoutError } from './llm.errors.js';
-import type { LlmAnalysisInput, LlmProvider } from './llm-provider.interface.js';
-import { buildPrompt, SYSTEM_PROMPT } from './prompt.js';
+import type { LlmAnalysisInput, LlmCorrectionContext, LlmProvider } from './llm-provider.interface.js';
+import { buildCorrectionPrompt, buildPrompt, SYSTEM_PROMPT } from './prompt.js';
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -52,13 +52,13 @@ export class GeminiLlmProvider implements LlmProvider {
     private readonly timeoutMs: number,
   ) {}
 
-  async analyze(input: LlmAnalysisInput): Promise<unknown> {
+  async analyze(input: LlmAnalysisInput, correction?: LlmCorrectionContext): Promise<unknown> {
     let response: Response;
     try {
       response = await fetch(this.buildUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': this.apiKey },
-        body: JSON.stringify(this.buildRequestBody(input)),
+        body: JSON.stringify(this.buildRequestBody(input, correction)),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (error) {
@@ -85,10 +85,26 @@ export class GeminiLlmProvider implements LlmProvider {
     return `${GEMINI_API_BASE}/models/${this.model}:generateContent`;
   }
 
-  private buildRequestBody(input: LlmAnalysisInput) {
+  private buildRequestBody(input: LlmAnalysisInput, correction?: LlmCorrectionContext) {
+    const contents = [{ role: 'user', parts: [{ text: buildPrompt(input) }] }];
+    if (correction) {
+      // Se modela como un turno de chat real (user -> model con la respuesta anterior -> user con
+      // el pedido de corrección) en vez de un string gigante pegado al prompt original — es más
+      // fiel a cómo Gemini interpreta el historial, y evita repetir todos los patrones de logs
+      // dentro del texto de corrección.
+      const previousText =
+        correction.previousResponse !== undefined
+          ? JSON.stringify(correction.previousResponse).slice(0, 4000)
+          : '(la respuesta anterior no era JSON válido)';
+      contents.push(
+        { role: 'model', parts: [{ text: previousText }] },
+        { role: 'user', parts: [{ text: buildCorrectionPrompt(correction) }] },
+      );
+    }
+
     return {
       systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-      contents: [{ role: 'user', parts: [{ text: buildPrompt(input) }] }],
+      contents,
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: GEMINI_RESPONSE_SCHEMA,

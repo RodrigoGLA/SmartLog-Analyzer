@@ -316,3 +316,233 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
   un problema del diseño — se documenta como una nota para quien reproduzca esto en desarrollo.
 - **Pendiente de revisar**: el reintento "con corrección" ante `LLM_INVALID_RESPONSE` sigue
   anotado y diferido (confirmado explícitamente con el autor esta vuelta, no implementado).
+
+### 2026-11-04 — Filtros en `GET /api/logs`, merge a `main`, e idea de notificación anotada
+- **Pedido**: el autor pidió comitear y pushear el proveedor Gemini, mergear `develop` a `main` con
+  un comentario sobre el estado del flujo mínimo e2e, anotar en el repo (visible en git, no en
+  notas locales) la idea de notificar la finalización de un análisis (en vez de solo polling), y
+  después seguir con los 3 puntos pendientes en orden de prioridad: filtros de `GET /api/logs`,
+  health check, y el reintento "con corrección" del LLM. Antes de planificar los filtros, se releyó
+  el PDF del desafío para confirmar qué pide exactamente — resultó que `GET /api/logs` "con
+  filtros" está en la tabla de endpoints mínimos, no es un extra, y es un requisito distinto de la
+  consulta de agregación (`GET /api/logs/stats`, ya resuelta). Se usó `/plan` de nuevo: un
+  subagente `Explore` relevó el estado exacto del código y uno `Plan` diseñó la implementación.
+- **Aporte**: `git merge --no-ff develop -m "..."` a `main` (sin conflictos, 17 commits de
+  diferencia, nada divergente en `main`), con un mensaje describiendo el estado real (ingesta →
+  cola → worker → LLM real → consulta, con pulido pendiente). Pusheado a `origin/main`. La idea de
+  notificación quedó documentada como un nuevo ítem en `ARCHITECTURE.md` §8 ("Qué cambiaría en
+  producción"): un webhook opcional (`callbackUrl` en `POST /api/logs/analyze`) como complemento al
+  polling, con sus trade-offs frente a SSE/WebSocket. `GET /api/logs` ahora filtra por `service`
+  (case-insensitive, vía el filtro de relación de Prisma `service: { name: {...} } }`), `level`
+  (`@IsEnum(LogLevel)`), `from`/`to` (mismo patrón de validación que ya usaba `/stats`), y `search`
+  (substring case-insensitive sobre `message`, vía `contains` + `mode: 'insensitive'`, que Prisma
+  traduce a `ILIKE`). 8 tests unitarios nuevos en `logs.service.spec.ts` (cada filtro solo,
+  combinados, cero resultados, `from > to` rechazado) y 2 nuevos en el e2e (un combo
+  servicio+nivel de punta a punta, probando además la insensibilidad a mayúsculas con un query real
+  `?service=PAYMENTS-API`, y el caso 400).
+- **Corregido**: ninguno — el build/lint/unit/e2e completos pasaron a la primera.
+- **Decisión propia**: documentada como decisión #26 en `ARCHITECTURE.md`. `service` matchea
+  case-insensitive aunque `Service.name` es una unique key case-sensitive asignada por upsert
+  exacto al ingestar (decisión #11) — son problemas distintos (ingesta vs. filtro de listado).
+  `?search=` vacío se rechaza con 400 en vez de interpretarse como "sin filtro". `search` no tiene
+  ningún índice detrás (no hay `ILIKE`/full-text en ningún otro lado del proyecto) — aceptable a
+  esta escala, se agregó un ítem nuevo en §8 para un índice `pg_trgm`/GIN o mover la búsqueda a
+  Elasticsearch en producción, mismo tratamiento que ya reciben la paginación por offset y el test
+  de carga de la cola.
+- **Pendiente de revisar**: health check (`GET /api/health`) y el reintento "con corrección" del
+  LLM, en ese orden, según lo acordado con el autor.
+
+### 2026-11-04 — `GET /api/health` con `@nestjs/terminus`
+- **Pedido**: el autor pidió comitear/pushear el trabajo de filtros y seguir con el health check,
+  preguntando primero qué es un health check (se le explicó en el chat: un endpoint que consultan
+  sistemas automáticos — orquestadores, balanceadores, monitoreo — para saber si el servicio está
+  sano, no una pantalla para una persona). Pidió explícitamente no planificar con `/plan` esta vez
+  ("confío en tu criterio... solo cuando termines explicame el flujo"), así que se implementó
+  directo sin pasar por modo plan.
+- **Aporte**: `GET /api/health` vía `@nestjs/terminus` (`HealthModule`/`HealthController` en
+  `src/health/`), usando el `PrismaHealthIndicator` ya incluido en el paquete (hace
+  `$queryRawUnsafe('SELECT 1')` con timeout de 1s) contra `PrismaService` — no se escribió el ping
+  a mano. `ProblemDetailsFilter` se extendió con un caso para la forma particular que usa el
+  `HealthCheckResult` que lanza terminus (`status` + `details`, sin `message`/`error` como el resto
+  de las `HttpException`), listando en `errors` qué indicador falló y por qué, para no perder esa
+  información al envolverla en el mismo `application/problem+json` que ya usa toda la API. Tests:
+  2 unitarios en `health.controller.spec.ts` (ok con la base arriba, `ServiceUnavailableException`
+  con la base abajo, mockeando `PrismaService` pero compilando el módulo real de terminus) + 1 caso
+  nuevo en `problem-details.filter.spec.ts` (mapea un `HealthCheckResult` de error a 503 con el
+  detalle) + 1 e2e nuevo (`tests/health.e2e-spec.ts`, Testcontainers, camino feliz). Verificación
+  manual además de los tests automatizados: con la app corriendo de verdad contra el Postgres de
+  Docker, `GET /api/health` devolvió `200` con `status: 'up'`; deteniendo el contenedor
+  (`docker stop`) con la app corriendo, el mismo endpoint devolvió `503` con
+  `errors: ["database: ..."]` describiendo la falla real de conexión; al reiniciar el contenedor
+  (`docker start`), sin reiniciar la app, volvió a `200` solo — confirmando que no hay estado
+  cacheado entre chequeos.
+- **Corregido**: el primer test unitario fallaba porque el mock de `PrismaService` solo tenía
+  `$queryRawUnsafe` — `PrismaHealthIndicator.pingDb` prueba primero `$runCommandRaw` (su ping para
+  Mongo) y solo cae a `$queryRawUnsafe` (el ping SQL) cuando ese primer intento lanza el error
+  específico que un `PrismaClient` real sobre Postgres tira para ese método
+  (`"Use the mongodb provider"`); el mock necesitaba simular también ese primer fallo para llegar
+  al camino SQL, igual que lo hace un cliente real.
+- **Decisión propia**: documentada como decisión #27 en `ARCHITECTURE.md`. Un solo indicador
+  (Postgres, vía Prisma) — no se agrega uno aparte para pg-boss porque corre sobre la misma
+  conexión, así que sería redundante. Se agregó también un ítem nuevo en `ARCHITECTURE.md` §8:
+  separar *liveness* de *readiness* (y eventualmente sumar un ping al LLM) queda para producción,
+  no para este desafío, que pide un único `GET /api/health`.
+- **Pendiente de revisar**: el reintento "con corrección" del LLM ante `LLM_INVALID_RESPONSE`
+  sigue como el último de los 3 puntos prioritarios acordados con el autor.
+
+### 2026-11-04 — Reintento "con corrección" ante `LLM_INVALID_RESPONSE`
+- **Pedido**: el autor pidió implementar el último de los 3 puntos prioritarios — la idea que
+  había quedado anotada (y diferida) desde la Etapa 5: cuando el LLM devuelve algo que no cumple
+  `analysisResultSchema`, reenviarle el prompt 1-2 veces con el error de validación antes de
+  rendirse. Pidió un plan corto con una descripción y los casos a considerar para el retry (vía
+  `/plan`), y de paso aclaró que, si testear el camino de reintento resultaba muy complejo (forzar
+  al LLM real a fallar), se podía omitir esa cobertura. No hizo falta: todos los tests (unitarios y
+  e2e) usan dobles controlados (`vi.fn()`/un provider de prueba con una función mutable) que
+  simplemente devuelven primero una respuesta inválida y después una válida, sin tocar la API real
+  — la "complejidad" que preocupaba no aplicaba.
+- **Aporte**: `AnalysisWorkerService` ahora reintenta hasta `LLM_MAX_CORRECTION_RETRIES` veces
+  (env var nueva, default `1`, tope `2`) solo cuando la respuesta del LLM es `LLM_INVALID_RESPONSE`
+  (JSON que no cumple el schema, o ni siquiera es JSON) — `LlmTimeoutError`/`LlmProviderError`
+  siguen terminales de inmediato, sin cambios. El contexto de corrección (`LlmCorrectionContext`:
+  la respuesta anterior + el motivo del rechazo) se pasa como segundo parámetro opcional de
+  `LlmProvider.analyze`, no dentro de `LlmAnalysisInput`. `GeminiLlmProvider` lo arma como un turno
+  de chat real (`user` con el prompt original → `model` con la respuesta anterior → `user` con el
+  pedido de corrección) en vez de concatenar todo en un string. `pg-boss.expireInSeconds` pasó de
+  ser una constante fija (`60`) a calcularse a partir de `LLM_TIMEOUT_MS` y el tope de reintentos,
+  para que una secuencia de reintentos legítima nunca choque con que pg-boss declare el job
+  "colgado" y lo reintente él mismo en paralelo. Tests nuevos: `prompt.spec.ts` (nuevo),
+  `gemini-llm-provider.spec.ts` (+1, la forma del turno multi-chat), `analysis-worker.service.
+  spec.ts` (+4: reintenta y completa, agota reintentos y falla, `retries=0` no reintenta, el
+  provider lanzando `LlmInvalidResponseError` directamente también reintenta), y 2 casos e2e
+  nuevos en `tests/analysis.e2e-spec.ts` con el mismo double mutable que el archivo ya tenía.
+- **Corregido**: dos cosas detectadas recién al correr los tests, no al escribir el código.
+  (1) El `testConfig` falso que usan los 3 e2e specs (`logs`/`analysis`/`health`) ignoraba la
+  clave pedida y siempre devolvía la connection string de Postgres — funcionaba porque
+  `PgBossService` solo leía `DATABASE_URL` hasta ahora; al agregarle lectura de `LLM_TIMEOUT_MS`/
+  `LLM_MAX_CORRECTION_RETRIES` para calcular `expireInSeconds`, esos valores llegaban como string
+  (la URL) en vez de número, dando `NaN`. Se corrigió el double en los 3 archivos para responder
+  según la clave pedida, con defaults razonables. (2) El primer intento del test e2e "agota
+  reintentos" comparaba `result.errorCode` directo, pero `GET /api/analysis/:id` expone el error
+  anidado como `result.error.code` (`analysis.service.ts`) — se corrigió la aserción.
+- **Decisión propia**: documentada como decisión #28 en `ARCHITECTURE.md`.
+- **Pendiente de revisar**: ninguno de los 3 puntos prioritarios queda pendiente. Sigue para
+  después (Etapa 6, sin apuro): README, Dockerfile de la app, `docker-compose.yml` final.
+
+### 2026-11-04 — Documentar en Swagger el shape de error de cada endpoint
+- **Pedido**: probando `GET /api/health` a mano (parando el container de Postgres), el autor notó
+  que Swagger documentaba el 200 pero no decía nada del 503 real — y preguntó si eso estaba bien
+  documentado. Se le explicó que el código era correcto (el 503 real pasa por `ProblemDetailsFilter`,
+  no por el shape nativo de terminus — decisión #27) pero que Swagger nunca reflejaba ese shape de
+  error, ni en `/health` ni en ningún otro endpoint del proyecto (ninguno tenía `@ApiResponse` para
+  sus errores). El autor pidió agregarlo.
+- **Aporte**: `ProblemDetailsDto` nuevo (`src/common/dto/problem-details.dto.ts`), con el mismo
+  shape que ya arma `ProblemDetailsFilter`. Se agregó `@ApiResponse({status, type: ProblemDetailsDto})`
+  por cada error real que puede devolver cada controller: 400 en `POST/GET /api/logs`,
+  `GET /api/logs/stats` y `POST /api/logs/analyze` (validación o `from`/`to` invertido); 422 en
+  `POST /api/logs/analyze` (rango demasiado grande, o sin logs); 400/404 en `GET /api/analysis/:id`
+  (uuid inválido / no existe); 503 en `GET /api/health`.
+- **Corregido**: en `/api/health`, agregar `@ApiResponse(503, ...)` junto al `@HealthCheck()` de
+  terminus no alcanzaba — `@HealthCheck()` ya agrega su propia documentación Swagger para 200/503
+  (con el shape nativo `status`/`info`/`error`/`details`), y Nest mergea ambos `@ApiResponse` del
+  mismo status en vez de reemplazar uno por el otro, dejando un schema inconsistente (ambos
+  superpuestos). Se verificó esto leyendo `node_modules/@nestjs/terminus/dist/health-check/health-check.decorator.js`
+  y comparando `GET /docs-json` antes/después. Se resolvió con `@HealthCheck({ swaggerDocumentation: false })`
+  para apagar esa documentación automática y describir las dos respuestas (200 y 503) a mano.
+  Verificado levantando la app en un puerto aparte (sin tocar el proceso que el autor tenía
+  corriendo) y confirmando en `/docs` que el 503 de `/api/health` y los 400/404/422 del resto ya
+  muestran `ProblemDetailsDto`.
+- **Decisión propia**: documentada como decisión #29 en `ARCHITECTURE.md`.
+- **Pendiente de revisar**: ninguno. Sigue para después (Etapa 6, sin apuro): README ya en
+  `develop`; falta Dockerfile de la app y `docker-compose.yml` final.
+
+### 2026-11-04 — Verificación en vivo de cada endpoint y auditoría final de schemas
+- **Pedido**: el autor fue probando cada endpoint a mano contra el server real (`POST/GET /api/logs`,
+  `GET /api/logs/stats`, `POST /api/logs/analyze`, `GET /api/analysis/:id`), pidiendo en cada paso
+  verificar (no asumir) que el 200/400/404/422 documentado en Swagger coincidiera con la respuesta
+  real, y preguntando conceptos sobre la marcha (`traceId`, unicidad de `timestamp`, diseño de
+  `/logs` sin parámetros obligatorios, diferencia `/logs` vs `/logs/stats`). Incluyó un `POST
+  /api/logs/analyze` real contra Gemini (con su API key real, no mockeada — autorizado explícitamente
+  por el autor tras advertirle del costo), que resultó en un 503 real de Gemini (`UNAVAILABLE`,
+  "modelo con alta demanda"), dando pie a verificar cómo maneja eso la cola. Al cerrar, pidió una
+  última pasada sobre todos los schemas de response para encontrar y corregir lo que faltara.
+- **Aporte**: todas las verificaciones se hicieron con requests reales contra el server del autor
+  (puerto 3000) para los casos sin efecto en la cola/LLM (400/404/422, que lanzan antes de encolar),
+  y con una instancia descartable en un puerto aparte (3001, Postgres compartido) solo para leer
+  `/docs-json` sin reiniciar el proceso del autor. Se explicó la diferencia entre el 503
+  `UNAVAILABLE` de Gemini (sobrecarga del lado de Google, no consume cuota) y un 429
+  `RESOURCE_EXHAUSTED` (sí sería cuota) — el que apareció fue el primero. Se confirmó leyendo
+  `analysis-worker.service.ts` que ese 503 (como cualquier `LlmProviderError`) no se reintenta solo:
+  es un error de dominio (decisión #24), el worker lo persiste como `Analysis.status = failed` y
+  resuelve sin relanzar, así que pg-boss nunca lo ve como una falla a reintentar. En la auditoría
+  final de schemas se encontró que `POST /api/logs` (201), `GET /api/logs` (200) y `GET
+  /api/logs/stats` (200) nunca habían tenido su `@ApiResponse` de éxito — mismo hueco que la
+  decisión #29, pero del lado feliz en vez del de error. Se corrigieron los 3 con el shape real de
+  `logs.service.ts` (`LogResponse`/`PaginatedLogs`/`StatsResponse`), verificado otra vez contra
+  `/docs-json` en una instancia descartable.
+- **Corregido**: nada del comportamiento real — todo lo encontrado fue documentación de Swagger
+  desactualizada o incompleta (200/201 de `/logs*`), nunca una respuesta real distinta de lo
+  esperado.
+- **Decisión propia**: actualización de la decisión #29 en `ARCHITECTURE.md` (se amplía para
+  cubrir también el camino feliz, no solo los errores).
+- **Pendiente de revisar**: ninguno. Sigue para después (Etapa 6): README ya en `develop`; falta
+  Dockerfile de la app y `docker-compose.yml` final.
+
+### 2026-11-04 — Notificación de finalización de análisis: evaluada, no implementada
+- **Pedido**: avisar en tiempo real a quien pidió un análisis cuando termina, en vez de que la
+  única forma sea hacer polling a `GET /api/analysis/:id`, "sin complejizar mucho".
+- **Aporte**: se investigó primero la mecánica real de `@Sse()` de NestJS (leyendo el código fuente
+  de `@nestjs/core` instalado, no asumida) para una opción basada en SSE con un `Subject` de RxJS
+  en memoria. El autor preguntó específicamente si eso agregaba estado y comprometía el escalado
+  horizontal a futuro — pregunta acertada: sí lo hace. Se explicaron entonces 3 alternativas con su
+  flujo y trade-offs reales: SSE en memoria (se rompe entre instancias de la app), Postgres
+  `LISTEN`/`NOTIFY` (resuelve eso, pero se rompe si se escalara la propia base, y gasta una
+  conexión dedicada por cliente), y webhook (sin problema de escalado en ningún nivel, pero exige
+  simular un consumidor real para poder probarla).
+- **Corregido**: ninguno — no se llegó a escribir código, toda la vuelta fue de diseño/discusión.
+- **Decisión propia**: no implementar ninguna de las 3 en esta entrega. El webhook es la opción
+  correcta en diseño, pero probarla de punta a punta requeriría simular también el lado consumidor
+  (un segundo servidor, o un servicio externo tipo `webhook.site`), y el autor prefirió mantener el
+  foco en la aplicación propia. Documentado el análisis completo en `ARCHITECTURE.md` §8.
+- **Pendiente de revisar**: ninguno nuevo. Sigue para después (Etapa 6): README ya en `develop`;
+  falta Dockerfile de la app y `docker-compose.yml` final.
+
+### 2026-11-04 — Etapa 6: Dockerfile, docker-compose final y cierre
+- **Pedido**: cerrar el proyecto — Dockerfile multi-stage de la app, `docker-compose.yml` que
+  levante app+db juntos, actualizar README/ARCHITECTURE.md, y tildar el checklist de `CLAUDE.md`.
+- **Aporte**: antes de escribir el Dockerfile se inspeccionó `node_modules/.prisma/client` (no se
+  asumió nada) y se encontró que Prisma 7 con el adapter de driver genera un compilador de queries
+  en WASM, no un binario nativo — esto elimina el clásico problema de `binaryTargets` entre Alpine
+  (musl) y glibc en Docker, simplificando el diseño. Se armó un Dockerfile de 2 etapas
+  (`node:26-alpine` ambas), reclasificando `prisma` y `dotenv` de `devDependencies` a
+  `dependencies` (necesarios en runtime para `prisma migrate deploy`), con migraciones automáticas
+  al arrancar el container. Se agregó el servicio `app` a `docker-compose.yml` (con `DATABASE_URL`
+  apuntando a `db` dentro de la red de Compose, distinto del `localhost` que usa `.env` para
+  desarrollo local) y un `.dockerignore` nuevo. Se actualizaron README (flujo "todo en Docker" +
+  limpieza de "Qué queda afuera", ya resuelto) y `ARCHITECTURE.md` (decisión #30, más un puntero
+  agregado a la #16). Se verificó de punta a punta en un stack Docker aislado (project name y
+  puertos propios, sin tocar el `db`/server reales del autor) — build, migración, `/api/health` en
+  200, Swagger sirviendo, `POST`/`GET /api/logs` reales.
+
+  El autor pidió explícitamente asegurar que un evaluador externo pueda levantar el proyecto sin
+  problemas (es lo que más pesa en la entrega). Para probarlo de verdad, se repitió la verificación
+  simulando a un evaluador real: se guardó el `.env` real a un costado, se copió `.env.example` tal
+  cual (sin ningún ajuste manual, como dice el README) y se corrió `docker compose up --build` desde
+  cero. Eso expuso dos problemas reales que el chequeo anterior no veía (porque usaba el `.env` ya
+  configurado del propio desarrollo, con `LLM_PROVIDER=gemini` entre otras cosas ya ajustadas):
+  (1) el comentario de `DATABASE_URL` en `.env.example` seguía diciendo "no en Docker todavía"
+  (desactualizado); (2) el flujo documentado requería un paso manual extra (`docker compose exec
+  app npm run db:seed`) para tener datos — si un evaluador no lo veía, `GET /api/logs` le devolvía
+  vacío y `POST /api/logs/analyze` un 422 confuso ("no hay logs") en su primera prueba.
+- **Corregido**: se agregó el seed (`npm run db:seed`) al arranque automático del container, junto
+  a las migraciones — es idempotente (decisión #19), así que correrlo en cada arranque es seguro y
+  no pisa datos insertados a mano. Se re-verificó con la misma simulación de evaluador (`.env.example`
+  tal cual) de punta a punta: base poblada (4800 logs) y un `POST /api/logs/analyze` real con el
+  mock terminando en `completed`, sin ningún paso manual. Se corrigieron también el comentario
+  desactualizado de `.env.example` y el requisito de Node en el README (ya no aplica al flujo
+  "todo en Docker", solo al desarrollo local).
+- **Decisión propia**: decisión #30 en `ARCHITECTURE.md` (incluye el seed automático). De paso se
+  tildaron las Etapas 1 y 2 del checklist de `CLAUDE.md`, que ya estaban completas en sus
+  sub-ítems pero habían quedado sin marcar de versiones anteriores.
+- **Pendiente de revisar**: ninguno. Quedan solo los extras opcionales "si hay tiempo" listados en
+  `CLAUDE.md` (bucketing por intervalo en `/logs/stats`, Makefile, logging estructurado, ingesta
+  por lotes) — ninguno bloquea la entrega.
