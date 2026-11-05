@@ -44,3 +44,10 @@ jobs:
       - run: npm ci
       - run: npm run db:generate
       - run: npm run test:e2e
+
+  docker-build:
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build .
