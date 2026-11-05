@@ -224,16 +224,35 @@ Cada decisión incluye la alternativa descartada y el motivo.
   chicos y concurrencia vía las opciones nativas de pg-boss) que no aporta a lo que el desafío
   evalúa.
 - **Notificar la finalización de un análisis en vez de solo exponer `GET /api/analysis/:id` para
-  polling.** El enunciado solo pide ese endpoint, y el polling ya cubre el caso de uso mínimo — pero
-  dado que esta API la consume típicamente otro servicio (no una persona mirando una pantalla), el
-  complemento natural sería un **webhook**: una `callbackUrl` opcional en el body de
-  `POST /api/logs/analyze`, a la que `AnalysisWorkerService` le hace un `POST` con el resultado
-  (`completed` o `failed`) apenas termina de persistirlo, con su propia política de reintentos de
-  entrega (independiente de la del job en pg-boss) y protección contra SSRF (no debería poder
-  apuntar a una red/servicio interno). Se consideraron también SSE/WebSocket (un stream por
-  `analysisId`) para un caso de uso más interactivo, pero agregan estado y complejidad de
-  pub/sub entre instancias que no se justifican para un consumidor que es otro backend, no un
-  browser.
+  polling.** El enunciado solo pide ese endpoint, y el polling ya cubre el caso de uso mínimo. Se
+  evaluaron en profundidad 3 alternativas antes de decidir no implementar ninguna por ahora:
+  1. **SSE con un `Subject` de RxJS en memoria** (`GET /api/analysis/:id/events`, sin dependencias
+     nuevas): la más simple de las tres, pero con estado scoped a un solo proceso Node — si el
+     proyecto corriera en más de una instancia de la app, un cliente conectado a la instancia A no
+     se entera si el job lo resuelve el worker de la instancia B, porque cada instancia tiene su
+     propio `Subject` en su propia memoria.
+  2. **Postgres `LISTEN`/`NOTIFY`**: resuelve el problema entre instancias de la app (cualquier
+     instancia escuchando el canal se entera, sin agregar infraestructura nueva — ya se usa
+     Postgres), pero con dos costos propios: una conexión Postgres dedicada y de larga duración por
+     cada cliente SSE conectado (no reutilizable del pool de Prisma), y un límite de escalado
+     *distinto*: `NOTIFY` es por-servidor, no se replica, así que se rompe si algún día se escalara
+     la propia base (réplicas de lectura, sharding) — un eje de escalado que ni la opción 1 ni la 3
+     tienen.
+  3. **Webhook**: una `callbackUrl` opcional en el body de `POST /api/logs/analyze`, a la que
+     `AnalysisWorkerService` le haría un `POST` con el resultado apenas termina de persistirlo, con
+     su propia política de reintentos de entrega (independiente de la del job en pg-boss) y
+     protección contra SSRF (no debería poder apuntar a una red/servicio interno). Es la única de
+     las tres sin ningún problema de escalado, ni de la app ni de la base — es una llamada HTTP
+     saliente común, sin conexión sostenida ni estado compartido.
+
+  **Se descartaron las 3 para esta entrega**: el webhook es, en diseño, la opción correcta a largo
+  plazo (y la única pensada originalmente para esta API, consumida típicamente por otro backend, no
+  por un browser mirando una pantalla) — pero probarla de punta a punta requiere también simular el
+  lado consumidor (un segundo servidor de juguete escuchando esa `callbackUrl`, o un servicio
+  externo tipo `webhook.site` solo para la demo), que quedó fuera de foco: el autor prefirió
+  mantener el esfuerzo en la aplicación propia en vez de sumar una pieza de infraestructura ajena
+  solo para completar la demo de esta feature puntual. Queda documentado el análisis completo para
+  quien retome el proyecto — el webhook sigue siendo la vía recomendada.
 - **Índice para `search` en `GET /api/logs`.** Hoy filtra `message` con `ILIKE` (vía `contains` +
   `mode: 'insensitive'` de Prisma) sin ningún índice que lo respalde — a este volumen de prototipo
   barre la tabla completa cuando se combina con filtros que no acotan mucho primero (ver decisión

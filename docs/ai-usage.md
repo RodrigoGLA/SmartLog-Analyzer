@@ -486,3 +486,22 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
   cubrir también el camino feliz, no solo los errores).
 - **Pendiente de revisar**: ninguno. Sigue para después (Etapa 6): README ya en `develop`; falta
   Dockerfile de la app y `docker-compose.yml` final.
+
+### 2026-11-04 — Notificación de finalización de análisis: evaluada, no implementada
+- **Pedido**: avisar en tiempo real a quien pidió un análisis cuando termina, en vez de que la
+  única forma sea hacer polling a `GET /api/analysis/:id`, "sin complejizar mucho".
+- **Aporte**: se investigó primero la mecánica real de `@Sse()` de NestJS (leyendo el código fuente
+  de `@nestjs/core` instalado, no asumida) para una opción basada en SSE con un `Subject` de RxJS
+  en memoria. El autor preguntó específicamente si eso agregaba estado y comprometía el escalado
+  horizontal a futuro — pregunta acertada: sí lo hace. Se explicaron entonces 3 alternativas con su
+  flujo y trade-offs reales: SSE en memoria (se rompe entre instancias de la app), Postgres
+  `LISTEN`/`NOTIFY` (resuelve eso, pero se rompe si se escalara la propia base, y gasta una
+  conexión dedicada por cliente), y webhook (sin problema de escalado en ningún nivel, pero exige
+  simular un consumidor real para poder probarla).
+- **Corregido**: ninguno — no se llegó a escribir código, toda la vuelta fue de diseño/discusión.
+- **Decisión propia**: no implementar ninguna de las 3 en esta entrega. El webhook es la opción
+  correcta en diseño, pero probarla de punta a punta requeriría simular también el lado consumidor
+  (un segundo servidor, o un servicio externo tipo `webhook.site`), y el autor prefirió mantener el
+  foco en la aplicación propia. Documentado el análisis completo en `ARCHITECTURE.md` §8.
+- **Pendiente de revisar**: ninguno nuevo. Sigue para después (Etapa 6): README ya en `develop`;
+  falta Dockerfile de la app y `docker-compose.yml` final.
