@@ -32,8 +32,10 @@ salida del LLM, Google Gemini como proveedor real (con un mock para desarrollo/t
 
 ## Cómo correrlo
 
-Requisitos: Node 26.x (ver `engines` en `package.json`) y Docker (para Postgres, y para los tests
-e2e, que levantan un Postgres efímero con Testcontainers).
+Requisito mínimo para probarlo: **solo Docker Desktop** (ver más abajo, "Todo en Docker"). Node
+26.x (ver `engines` en `package.json`) hace falta únicamente si vas a correr la app local para
+iterar sobre el código, o los tests e2e (que además levantan un Postgres efímero con
+Testcontainers, usando el mismo Docker).
 
 **Desarrollo local** (recompila al vuelo, recomendado mientras se itera):
 
@@ -56,8 +58,9 @@ cp .env.example .env
 docker compose up --build
 ```
 
-El container de la app corre las migraciones solo al arrancar (`prisma migrate deploy`), pero no
-siembra datos de ejemplo — para eso, con todo arriba: `docker compose exec app npm run db:seed`.
+El container de la app corre solo, al arrancar, las migraciones (`prisma migrate deploy`) y el seed
+de ejemplo (12 servicios, ~4800 logs) — queda listo para probar sin ningún paso manual extra. El
+seed es idempotente: se puede reiniciar el container las veces que haga falta sin duplicar datos.
 
 Por defecto `LLM_PROVIDER=mock` en `.env.example`, así que no hace falta ninguna key para probar el
 flujo completo. Para usar el proveedor real, generar una key gratuita en

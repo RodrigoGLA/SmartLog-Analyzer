@@ -519,14 +519,30 @@ Por cada etapa: qué se pidió, qué aportó la IA, y qué se corrigió, rechaz�
   apuntando a `db` dentro de la red de Compose, distinto del `localhost` que usa `.env` para
   desarrollo local) y un `.dockerignore` nuevo. Se actualizaron README (flujo "todo en Docker" +
   limpieza de "Qué queda afuera", ya resuelto) y `ARCHITECTURE.md` (decisión #30, más un puntero
-  agregado a la #16). Se verificó de punta a punta con `docker compose down -v` +
-  `docker compose up --build` desde cero (ver detalle de la verificación real en el commit).
-- **Corregido**: ninguno grave — el diseño salió bien al primer intento gracias a verificar el
-  hallazgo del WASM antes de escribir el Dockerfile, en vez de copiar una receta genérica de
-  Prisma+Docker que hubiera asumido binarios nativos.
-- **Decisión propia**: decisión #30 en `ARCHITECTURE.md`. De paso se tildaron las Etapas 1 y 2 del
-  checklist de `CLAUDE.md`, que ya estaban completas en sus sub-ítems pero habían quedado sin
-  marcar de versiones anteriores.
+  agregado a la #16). Se verificó de punta a punta en un stack Docker aislado (project name y
+  puertos propios, sin tocar el `db`/server reales del autor) — build, migración, `/api/health` en
+  200, Swagger sirviendo, `POST`/`GET /api/logs` reales.
+
+  El autor pidió explícitamente asegurar que un evaluador externo pueda levantar el proyecto sin
+  problemas (es lo que más pesa en la entrega). Para probarlo de verdad, se repitió la verificación
+  simulando a un evaluador real: se guardó el `.env` real a un costado, se copió `.env.example` tal
+  cual (sin ningún ajuste manual, como dice el README) y se corrió `docker compose up --build` desde
+  cero. Eso expuso dos problemas reales que el chequeo anterior no veía (porque usaba el `.env` ya
+  configurado del propio desarrollo, con `LLM_PROVIDER=gemini` entre otras cosas ya ajustadas):
+  (1) el comentario de `DATABASE_URL` en `.env.example` seguía diciendo "no en Docker todavía"
+  (desactualizado); (2) el flujo documentado requería un paso manual extra (`docker compose exec
+  app npm run db:seed`) para tener datos — si un evaluador no lo veía, `GET /api/logs` le devolvía
+  vacío y `POST /api/logs/analyze` un 422 confuso ("no hay logs") en su primera prueba.
+- **Corregido**: se agregó el seed (`npm run db:seed`) al arranque automático del container, junto
+  a las migraciones — es idempotente (decisión #19), así que correrlo en cada arranque es seguro y
+  no pisa datos insertados a mano. Se re-verificó con la misma simulación de evaluador (`.env.example`
+  tal cual) de punta a punta: base poblada (4800 logs) y un `POST /api/logs/analyze` real con el
+  mock terminando en `completed`, sin ningún paso manual. Se corrigieron también el comentario
+  desactualizado de `.env.example` y el requisito de Node en el README (ya no aplica al flujo
+  "todo en Docker", solo al desarrollo local).
+- **Decisión propia**: decisión #30 en `ARCHITECTURE.md` (incluye el seed automático). De paso se
+  tildaron las Etapas 1 y 2 del checklist de `CLAUDE.md`, que ya estaban completas en sus
+  sub-ítems pero habían quedado sin marcar de versiones anteriores.
 - **Pendiente de revisar**: ninguno. Quedan solo los extras opcionales "si hay tiempo" listados en
   `CLAUDE.md` (bucketing por intervalo en `/logs/stats`, Makefile, logging estructurado, ingesta
   por lotes) — ninguno bloquea la entrega.

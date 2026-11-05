@@ -17,7 +17,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/dist ./dist
-COPY db/prisma ./db/prisma
+COPY db ./db
 COPY prisma.config.ts ./
 EXPOSE 3000
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start:prod"]
+CMD ["sh", "-c", "npx prisma migrate deploy && npm run db:seed && npm run start:prod"]
